@@ -15,11 +15,6 @@ typedef ptrdiff_t index;
 #define Array_Count(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 typedef struct {
-   u8 *Data;
-   index Length;
-} string;
-
-typedef struct {
    u8 *Base;
    index Size;
    index Used;
@@ -55,44 +50,89 @@ static void *Allocate_Size(arena *Arena, index Size)
    return(Result);
 }
 
-static u8 *Read_Entire_File(arena *Arena, char *Path)
+typedef struct {
+   u8 *Data;
+   index Length;
+} string;
+
+static string Span(u8 *Begin, u8 *End)
 {
-   u8 *Result = 0;
+   string Result = {0};
+   Result.Data = Begin;
+   if(Begin)
+   {
+      Result.Length = End - Begin;
+   }
+
+   return(Result);
+}
+
+static string Trim_Left(string String)
+{
+   while(String.Length && *String.Data <= ' ')
+   {
+      String.Data++;
+      String.Length--;
+   }
+
+   return(String);
+}
+
+static string Trim_Right(string String)
+{
+   while(String.Length && String.Data[String.Length - 1] <= ' ')
+   {
+      String.Length--;
+   }
+
+   return(String);
+}
+
+typedef struct {
+   string Head;
+   string Tail;
+   bool Ok;
+} cut;
+
+static cut Cut(string String, u8 Separator)
+{
+   cut Result = {0};
+
+   if(String.Length > 0)
+   {
+      u8 *Begin = String.Data;
+      u8 *End = Begin + String.Length;
+
+      u8 *Cut_Position = Begin;
+      while(Cut_Position < End && *Cut_Position != Separator)
+      {
+         Cut_Position++;
+      }
+
+      Result.Ok = (Cut_Position < End);
+      Result.Head = Span(Begin, Cut_Position);
+      Result.Tail = Span(Cut_Position + Result.Ok, End);
+   }
+
+   return(Result);
+}
+
+static string Read_Entire_File(arena *Arena, char *Path)
+{
+   string Result = {0};
 
    FILE *File = fopen(Path, "rb");
    if(File)
    {
-      if(fseek(File, 0, SEEK_END) == 0)
+      Result.Data = Arena->Base + Arena->Used;
+
+      index Available_Space = Arena->Size - Arena->Used;
+      Result.Length = fread(Result.Data, 1, Available_Space, File);
+      Allocate_Size(Arena, Result.Length);
+
+      if(Result.Length == Available_Space)
       {
-         size_t Size = ftell(File);
-         if(fseek(File, 0, SEEK_SET) == 0)
-         {
-            Result = Allocate(Arena, u8, Size + 1); // Extra byte for null terminator.
-            if(Result)
-            {
-               if(fread(Result, 1, Size, File) == Size)
-               {
-                  Result[Size] = 0; // Null-terminated for your convenience.
-               }
-               else
-               {
-                  Report_Error("Failed to read input file \"%s\".", Path);
-                  Result = 0;
-               }
-            }
-            else
-            {
-               Report_Error("Failed to allocate memory for input file \"%s\".", Path);
-            }
-         }
-         else
-         {
-            Report_Error("Seek to beginning of file failed for \"%s\".", Path);
-         }
-      }
-      else
-      {
-         Report_Error("Seek to end of file failed for \"%s\".", Path);
+         Report_Error("File exhausted arena memory, likely truncating \"%s\".", Path);
       }
    }
    else
@@ -100,19 +140,6 @@ static u8 *Read_Entire_File(arena *Arena, char *Path)
       Report_Error("Failed to open input file \"%s\".", Path);
    }
 
-   // TODO: Not enough error states.
-
-   return(Result);
-}
-
-static bool Is_Whitespace(u8 Character)
-{
-   bool Result = (Character == ' ' ||
-                  Character == '\t' ||
-                  Character == '\v' ||
-                  Character == '\f' ||
-                  Character == '\n' ||
-                  Character == '\r');
    return(Result);
 }
 
@@ -123,52 +150,48 @@ typedef struct line_block {
    struct line_block *Next;
 } line_block;
 
-static line_block *Lex(arena *Arena, u8 *Input_Memory)
+static line_block *Lex(arena *Arena, string Source)
 {
    // NOTE: For now, the lexed "tokens" are just the individual non-empty lines
    // in the input file.
 
-   line_block *Result = Allocate(Arena, line_block, 1);
-   Result->Count = 0;
-   Result->Next = 0;
+   line_block *Result = 0;
+   line_block *Block = 0;
 
-   line_block *Block = Result;
+   cut Input_Cut = {0};
+   Input_Cut.Tail = Source;
 
-   while(Input_Memory && *Input_Memory)
+   while(Input_Cut.Tail.Length)
    {
-      // NOTE: Remove preceeding whitespace (including empty lines).
-      while(*Input_Memory && Is_Whitespace(*Input_Memory))
+      Input_Cut = Cut(Input_Cut.Tail, '\n');
+      if(Input_Cut.Ok)
       {
-         Input_Memory++;
-      }
+         string Line = Input_Cut.Head;
+         Line = Trim_Left(Line);
+         Line = Trim_Right(Line);
 
-      if(*Input_Memory)
-      {
-         if(Block->Count >= Array_Count(Block->Lines))
+         if(Line.Length > 0)
          {
-            Block->Next = Allocate(Arena, line_block, 1);
+            if(!Block)
+            {
+               Block = Allocate(Arena, line_block, 1);
+               Block->Count = 0;
+               Block->Next = 0;
 
-            Block = Block->Next;
-            Block->Count = 0;
-            Block->Next = 0;
-         }
+               if(!Result)
+               {
+                  Result = Block;
+               }
+            }
+            else if(Block->Count >= Array_Count(Block->Lines))
+            {
+               Block->Next = Allocate(Arena, line_block, 1);
+               Block = Block->Next;
+               Block->Count = 0;
+               Block->Next = 0;
+            }
 
-         string *Line = Block->Lines + Block->Count++;
-         Line->Data = Input_Memory;
-
-         while(*Input_Memory && *Input_Memory != '\n')
-         {
-            Input_Memory++;
-         }
-         Line->Length = Input_Memory - Line->Data;
-
-         if(*Input_Memory == '\n')
-         {
-            Input_Memory++;
-         }
-         else
-         {
-            assert(*Input_Memory == 0);
+            Block->Lines[Block->Count++] = Line;
          }
       }
    }
@@ -179,7 +202,7 @@ static line_block *Lex(arena *Arena, u8 *Input_Memory)
 int main(int Argument_Count, char **Arguments)
 {
    arena Arena = {0};
-   Arena.Size = 1024 * 1024;
+   Arena.Size = 1024 * 1024 * 1024;
    Arena.Base = malloc(Arena.Size);
 
    // NOTE: For now, assume that all provided arguments are input files.
@@ -188,16 +211,13 @@ int main(int Argument_Count, char **Arguments)
       char *Path = Arguments[Input_Index];
       printf("Input_File_%02d: %s\n", Input_Index, Path);
 
-      u8 *Input_Memory = Read_Entire_File(&Arena, Path);
-      if(Input_Memory)
+      string Source = Read_Entire_File(&Arena, Path);
+      for(line_block *Block = Lex(&Arena, Source); Block; Block = Block->Next)
       {
-         for(line_block *Block = Lex(&Arena, Input_Memory); Block; Block = Block->Next)
+         for(int Line_Index = 0; Line_Index < Block->Count; ++Line_Index)
          {
-            for(int Line_Index = 0; Line_Index < Block->Count; ++Line_Index)
-            {
-               string Line = Block->Lines[Line_Index];
-               printf("%03d: %.*s\n", Line_Index, Line.Length, Line.Data);
-            }
+            string Line = Block->Lines[Line_Index];
+            printf("%03d: %.*s\n", Line_Index, Line.Length, Line.Data);
          }
       }
    }
