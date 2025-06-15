@@ -12,6 +12,10 @@ typedef ptrdiff_t index;
 #include <stdio.h>
 #include <stdlib.h>
 
+#define index YOU_CANT_HAVE_INDEX
+#include <string.h>
+#undef index
+
 #define Array_Count(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 typedef struct {
@@ -32,7 +36,8 @@ static void Report_Error(char *Message, ...)
    fprintf(stderr, "\n");
 }
 
-#define Allocate(Arena, type, Count) (type *)Allocate_Size((Arena), sizeof(type) * (Count))
+#define Allocate(Arena, type, Count)                        \
+   (type *)Allocate_Size((Arena), sizeof(type) * (Count))
 
 static void *Allocate_Size(arena *Arena, index Size)
 {
@@ -67,6 +72,12 @@ static string Span(u8 *Begin, u8 *End)
    return(Result);
 }
 
+static bool Equals(string A, string B)
+{
+   bool Result = (A.Length == B.Length) && (!A.Length || !memcmp(A.Data, B.Data, A.Length));
+   return Result;
+}
+
 static string Trim_Left(string String)
 {
    while(String.Length && *String.Data <= ' ')
@@ -89,9 +100,9 @@ static string Trim_Right(string String)
 }
 
 typedef struct {
-   string Head;
-   string Tail;
-   bool Ok;
+   string Before;
+   string After;
+   bool Found;
 } cut;
 
 static cut Cut(string String, u8 Separator)
@@ -109,9 +120,9 @@ static cut Cut(string String, u8 Separator)
          Cut_Position++;
       }
 
-      Result.Ok = (Cut_Position < End);
-      Result.Head = Span(Begin, Cut_Position);
-      Result.Tail = Span(Cut_Position + Result.Ok, End);
+      Result.Found = (Cut_Position < End);
+      Result.Before = Span(Begin, Cut_Position);
+      Result.After = Span(Cut_Position + Result.Found, End);
    }
 
    return(Result);
@@ -143,61 +154,23 @@ static string Read_Entire_File(arena *Arena, char *Path)
    return(Result);
 }
 
-typedef struct line_block {
-   string Lines[1024];
-   int Count;
+typedef enum {
+   ASM_LINE_INSTRUCTION,
+   ASM_LINE_LABEL,
+   ASM_LINE_DIRECTIVE,
+} asm_line_kind;
 
-   struct line_block *Next;
-} line_block;
+typedef struct {
+   asm_line_kind Kind;
+   string Text;
 
-static line_block *Lex(arena *Arena, string Source)
-{
-   // NOTE: For now, the lexed "tokens" are just the individual non-empty lines
-   // in the input file.
+   string Mnemonic;
+   string Label;
+   string Directive;
+   string Arguments;
 
-   line_block *Result = 0;
-   line_block *Block = 0;
-
-   cut Input_Cut = {0};
-   Input_Cut.Tail = Source;
-
-   while(Input_Cut.Tail.Length)
-   {
-      Input_Cut = Cut(Input_Cut.Tail, '\n');
-      if(Input_Cut.Ok)
-      {
-         string Line = Input_Cut.Head;
-         Line = Trim_Left(Line);
-         Line = Trim_Right(Line);
-
-         if(Line.Length > 0)
-         {
-            if(!Block)
-            {
-               Block = Allocate(Arena, line_block, 1);
-               Block->Count = 0;
-               Block->Next = 0;
-
-               if(!Result)
-               {
-                  Result = Block;
-               }
-            }
-            else if(Block->Count >= Array_Count(Block->Lines))
-            {
-               Block->Next = Allocate(Arena, line_block, 1);
-               Block = Block->Next;
-               Block->Count = 0;
-               Block->Next = 0;
-            }
-
-            Block->Lines[Block->Count++] = Line;
-         }
-      }
-   }
-
-   return(Result);
-}
+   int Number;
+} asm_line;
 
 int main(int Argument_Count, char **Arguments)
 {
@@ -212,13 +185,103 @@ int main(int Argument_Count, char **Arguments)
       printf("Input_File_%02d: %s\n", Input_Index, Path);
 
       string Source = Read_Entire_File(&Arena, Path);
-      for(line_block *Block = Lex(&Arena, Source); Block; Block = Block->Next)
+
+      cut Source_Cut = {0};
+      int Line_Count = 0; // Number of lines to allocate.
+
+      Source_Cut.After = Source;
+      while(Source_Cut.After.Length)
       {
-         for(int Line_Index = 0; Line_Index < Block->Count; ++Line_Index)
+         Source_Cut = Cut(Source_Cut.After, '\n');
+         cut Line_With_Comments = Cut(Source_Cut.Before, '\\');
+         string Text = Trim_Left(Trim_Right(Line_With_Comments.Before));
+         Line_Count += (Text.Length > 0);
+      }
+
+      asm_line *Lines = Allocate(&Arena, asm_line, Line_Count);
+      int Line_Index = 0;  // Index of allocated source line to populate.
+      int Line_Number = 1; // Line number position in source file.
+
+      Source_Cut.After = Source;
+      while(Source_Cut.After.Length)
+      {
+         Source_Cut = Cut(Source_Cut.After, '\n');
+         cut Comment = Cut(Source_Cut.Before, '\\');
+
+         asm_line Line = {0};
+         Line.Text = Trim_Left(Trim_Right(Comment.Before));
+         Line.Number = Line_Number++;
+         if(Line.Text.Length > 0)
          {
-            string Line = Block->Lines[Line_Index];
-            printf("%03d: %.*s\n", Line_Index, Line.Length, Line.Data);
+            // NOTE: This line contained actual code, so store it for parsing.
+            if(Line.Text.Data[0] == '#')
+            {
+               Line.Kind = ASM_LINE_DIRECTIVE;
+               cut Directive_With_Argument = Cut(Line.Text, ' ');
+               Line.Directive = Directive_With_Argument.Before;
+               if(Directive_With_Argument.Found)
+               {
+                  Line.Arguments = Directive_With_Argument.After;
+               }
+            }
+            else
+            {
+               Line.Kind = ASM_LINE_INSTRUCTION;
+               Line.Mnemonic = Line.Text;
+
+               cut Line_With_Label = Cut(Line.Text, ':');
+               if(Line_With_Label.Found)
+               {
+                  Line.Label = Line_With_Label.Before;
+                  Line.Mnemonic = Trim_Left(Line_With_Label.After);
+               }
+
+               if(Line.Mnemonic.Length)
+               {
+                  cut Arguments = Cut(Line.Mnemonic, ' ');
+                  if(Arguments.Found)
+                  {
+                     Line.Arguments = Arguments.After;
+                  }
+               }
+               else
+               {
+                  // NOTE: ASM_LINE_LABEL refers to lines with only a label, no
+                  // instruction. Lines such as `.loop: b .loop` are considered
+                  // to be ASM_LINE_INSTRUCTION's instead.
+                  Line.Kind = ASM_LINE_LABEL;
+               }
+            }
+
+            Lines[Line_Index++] = Line;
          }
+      }
+
+      for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
+      {
+         asm_line Line = Lines[Line_Index];
+         printf("%03d:  ", Line.Number);
+
+         switch(Line.Kind)
+         {
+            case ASM_LINE_INSTRUCTION: {
+               printf("%.*s", Line.Mnemonic.Length, Line.Mnemonic.Data);
+            } break;
+
+            case ASM_LINE_LABEL: {
+               printf("%.*s", Line.Label.Length, Line.Label.Data);
+            } break;
+
+            case ASM_LINE_DIRECTIVE: {
+               printf("%.*s", Line.Directive.Length, Line.Directive.Data);
+            } break;
+         }
+
+         if(Line.Arguments.Length)
+         {
+            printf(" %.*s", Line.Arguments.Length, Line.Arguments.Data);
+         }
+         printf("\n");
       }
    }
 
