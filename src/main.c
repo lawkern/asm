@@ -60,6 +60,8 @@ typedef struct {
    index Length;
 } string;
 
+#define S(String) (string){(String), sizeof(String)-1}
+
 static string Span(u8 *Begin, u8 *End)
 {
    string Result = {0};
@@ -157,20 +159,31 @@ static string Read_Entire_File(arena *Arena, char *Path)
 typedef enum {
    ASM_LINE_INSTRUCTION,
    ASM_LINE_LABEL,
+   ASM_LINE_LABEL_INSTRUCTION,
    ASM_LINE_DIRECTIVE,
 } asm_line_kind;
 
 typedef struct {
    asm_line_kind Kind;
-   string Text;
-
-   string Mnemonic;
-   string Label;
-   string Directive;
-   string Arguments;
-
+   union
+   {
+      struct
+      {
+         string Label;
+         string Instruction;
+      };
+      string Directive;
+   };
    int Number;
 } asm_line;
+
+#if ARCH_6502
+#   include "architecture_6502.c"
+#elif ARCH_ARM4VT
+#   include "architecture_armv4t.c"
+#else
+#   error Unhandled architecture.
+#endif
 
 int main(int Argument_Count, char **Arguments)
 {
@@ -209,47 +222,30 @@ int main(int Argument_Count, char **Arguments)
          cut Comment = Cut(Source_Cut.Before, '\\');
 
          asm_line Line = {0};
-         Line.Text = Trim_Left(Trim_Right(Comment.Before));
          Line.Number = Line_Number++;
-         if(Line.Text.Length > 0)
+
+         string Text = Trim_Left(Trim_Right(Comment.Before));
+         if(Text.Length > 0)
          {
             // NOTE: This line contained actual code, so store it for parsing.
-            if(Line.Text.Data[0] == '#')
+            if(Text.Data[0] == '#')
             {
                Line.Kind = ASM_LINE_DIRECTIVE;
-               cut Directive_With_Argument = Cut(Line.Text, ' ');
-               Line.Directive = Directive_With_Argument.Before;
-               if(Directive_With_Argument.Found)
-               {
-                  Line.Arguments = Directive_With_Argument.After;
-               }
+               Line.Directive = Text;
             }
             else
             {
-               Line.Kind = ASM_LINE_INSTRUCTION;
-               Line.Mnemonic = Line.Text;
-
-               cut Line_With_Label = Cut(Line.Text, ':');
-               if(Line_With_Label.Found)
+               cut Label = Cut(Text, ':');
+               if(Label.Found)
                {
-                  Line.Label = Line_With_Label.Before;
-                  Line.Mnemonic = Trim_Left(Line_With_Label.After);
-               }
-
-               if(Line.Mnemonic.Length)
-               {
-                  cut Arguments = Cut(Line.Mnemonic, ' ');
-                  if(Arguments.Found)
-                  {
-                     Line.Arguments = Arguments.After;
-                  }
+                  Line.Label = Label.Before;
+                  Line.Instruction = Trim_Left(Trim_Right(Label.After));
+                  Line.Kind = (Line.Instruction.Length == 0) ? ASM_LINE_LABEL : ASM_LINE_LABEL_INSTRUCTION;
                }
                else
                {
-                  // NOTE: ASM_LINE_LABEL refers to lines with only a label, no
-                  // instruction. Lines such as `.loop: b .loop` are considered
-                  // to be ASM_LINE_INSTRUCTION's instead.
-                  Line.Kind = ASM_LINE_LABEL;
+                  Line.Kind = ASM_LINE_INSTRUCTION;
+                  Line.Instruction = Label.Before;
                }
             }
 
@@ -264,23 +260,23 @@ int main(int Argument_Count, char **Arguments)
 
          switch(Line.Kind)
          {
-            case ASM_LINE_INSTRUCTION: {
-               printf("%.*s", Line.Mnemonic.Length, Line.Mnemonic.Data);
+            case ASM_LINE_INSTRUCTION:
+            case ASM_LINE_LABEL_INSTRUCTION: {
+               Generate_Instruction(Line);
+               printf(" (INSTRUCTION)");
             } break;
 
             case ASM_LINE_LABEL: {
                printf("%.*s", Line.Label.Length, Line.Label.Data);
+               printf(" (LABEL)");
             } break;
 
             case ASM_LINE_DIRECTIVE: {
                printf("%.*s", Line.Directive.Length, Line.Directive.Data);
+               printf(" (DIRECTIVE)");
             } break;
          }
 
-         if(Line.Arguments.Length)
-         {
-            printf(" %.*s", Line.Arguments.Length, Line.Arguments.Data);
-         }
          printf("\n");
       }
    }
