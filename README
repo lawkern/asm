@@ -1,0 +1,21 @@
+*WARNING: This software is unfinished.*
+
+A simple assembler for some architectures.
+
+I've been wanting to do more assembly programming. NASM is my usual assembler,
+but I've been working from an ARM machine lately. This was in part to write more
+ARM assembly, but in practice I'm not a big fan of GAS, the go-to assembler for
+ARM (granted, writing ARM assembly in GAS is not as bad as writing x64 in GAS).
+
+A simple assembler is not very complicated, so I thought it'd be fun to write my
+own. It also seems like a good opportunity to learn the ins and outs of
+different instruction sets, so I'd like to implement a few. In order of
+(probably) increasing complexity:
+
+- [ ] 6502 (for NES, Apple II, etc.)
+- [ ] ARMv4T (for GBA)
+- [ ] ARMv8-A (for Apple Silicon)
+
+There are other interesting options out there (68k, MIPS, etc.), but the list
+above covers actual machines I've tried programming recently. Which is another
+way to say this is all subject to change.
