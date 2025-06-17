@@ -8,14 +8,13 @@
 #section text
 #location 0x0100
 
-main:
+main: #api
     \ Immediate values have no sigil, and hex literals begin with '0x' (decimal is
     \ the default for non-prefixed integers). Memory references use brackets.
 
     lda 0x01                    \ Load immediate value into a
     lda [0x01]                  \ Load byte at zero page address into a
     lda [0x01 + x]              \ Load byte at zero page address + x-offset into a
-    lda [0x01 + y]              \ Load byte at zero page address + y-offset into a
     lda [0x0123]                \ Load byte at absolute address into a
     lda [0x0123 + x]            \ Load byte at absolute address + x-offset into a
     lda [0x0123 + y]            \ Load byte at absolute address + y-offset into a
@@ -24,7 +23,6 @@ main:
 
     sta [0x01]                  \ Store a at zero page address
     sta [0x01 + x]              \ Store a at zero page address + x-offset
-    sta [0x01 + y]              \ Store a at zero page address + y-offset
     sta [0x0123]                \ Store a at absolute address
     sta [0x0123 + x]            \ Store a at absolute address + x-offset
     sta [0x0123 + y]            \ Store a at absolute address + y-offset
@@ -34,7 +32,6 @@ main:
     ora 0x01                    \ Bitwise-Or immediate value into a
     ora [0x01]                  \ Bitwise-Or byte at zero page address into a
     ora [0x01 + x]              \ Bitwise-Or byte at zero page address + x-offset into a
-    ora [0x01 + y]              \ Bitwise-Or byte at zero page address + y-offset into a
     ora [0x0123]                \ Bitwise-Or byte at absolute address into a
     ora [0x0123 + x]            \ Bitwise-Or byte at absolute address + x-offset into a
     ora [0x0123 + y]            \ Bitwise-Or byte at absolute address + y-offset into a
@@ -44,7 +41,6 @@ main:
     eor 0x01                    \ Bitwise-xor immediate value into a
     eor [0x01]                  \ Bitwise-xor byte at zero page address into a
     eor [0x01 + x]              \ Bitwise-xor byte at zero page address + x-offset into a
-    eor [0x01 + y]              \ Bitwise-xor byte at zero page address + y-offset into a
     eor [0x0123]                \ Bitwise-xor byte at absolute address into a
     eor [0x0123 + x]            \ Bitwise-xor byte at absolute address + x-offset into a
     eor [0x0123 + y]            \ Bitwise-xor byte at absolute address + y-offset into a
@@ -54,7 +50,6 @@ main:
     adc 0x01                    \ Add immediate value into a
     adc [0x01]                  \ Add byte at zero page address into a
     adc [0x01 + x]              \ Add byte at zero page address + x-offset into a
-    adc [0x01 + y]              \ Add byte at zero page address + y-offset into a
     adc [0x0123]                \ Add byte at absolute address into a
     adc [0x0123 + x]            \ Add byte at absolute address + x-offset into a
     adc [0x0123 + y]            \ Add byte at absolute address + y-offset into a
@@ -64,7 +59,6 @@ main:
     sbc 0x01                    \ Subtract immediate value from a
     sbc [0x01]                  \ Subtract byte at zero page address from a
     sbc [0x01 + x]              \ Subtract byte at zero page address + x-offset from a
-    sbc [0x01 + y]              \ Subtract byte at zero page address + y-offset from a
     sbc [0x0123]                \ Subtract byte at absolute address from a
     sbc [0x0123 + x]            \ Subtract byte at absolute address + x-offset from a
     sbc [0x0123 + y]            \ Subtract byte at absolute address + y-offset from a
@@ -74,7 +68,6 @@ main:
     cmp 0x01                    \ Compare immediate value with a
     cmp [0x01]                  \ Compare byte at zero page address with a
     cmp [0x01 + x]              \ Compare byte at zero page address + x-offset with a
-    cmp [0x01 + y]              \ Compare byte at zero page address + y-offset with a
     cmp [0x0123]                \ Compare byte at absolute address with a
     cmp [0x0123 + x]            \ Compare byte at absolute address + x-offset with a
     cmp [0x0123 + y]            \ Compare byte at absolute address + y-offset with a
@@ -106,7 +99,7 @@ main:
     ror [0x0123 + x]            \ Absolute address + x-offset
 
     stx [0x01]                  \ Zero page address
-    stx [0x01 + y]              \ Zero page address + x-offset
+    stx [0x01 + y]              \ Zero page address + y-offset
     stx [0x0123]                \ Absolute address
 
     ldx 0x01                    \ Immediate

@@ -40,32 +40,6 @@ typedef enum {
    OPCODE_MVN = 0xF, // Move Not
 } opcode;
 
-typedef struct {
-   condition_code Condition;
-   opcode Opcode;
-} instruction;
-
-static void Generate_Instruction(asm_line Line)
+static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
 {
-   cut Operands = Cut(Line.Instruction, ' ');
-   if(Operands.Found)
-   {
-      string Mnemonic = Operands.Before;
-
-      if(Equals(Mnemonic, S("mov")))
-      {
-      }
-      else if(Equals(Mnemonic, S("add")))
-      {
-      }
-   }
-   else
-   {
-   }
-
-   // if(Line.Label.Length)
-   // {
-   //    printf("%.*s ", Line.Label.Length, Line.Label.Data);
-   // }
-   // printf("%.*s", Line.Instruction.Length, Line.Instruction.Data);
 }
