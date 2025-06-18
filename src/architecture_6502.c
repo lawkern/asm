@@ -74,7 +74,7 @@ static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Numbe
    return(Parsed_Number.Ok);
  }
 
-static instruction_data Parse_Instruction_Data(string Operands, bool Is_Branch)
+static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_Jump)
 {
    // TODO: Enforce syntax requirements.
 
@@ -118,7 +118,9 @@ static instruction_data Parse_Instruction_Data(string Operands, bool Is_Branch)
       else if(Has_Suffix_Then_Remove(&Operands, S("]")))
       {
          Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands);
-         Result.Addressing_Mode = (Result.Length == 2) ? ADDRMODE_ABSOLUTE : ADDRMODE_ZEROPAGE;
+         Result.Addressing_Mode = (Result.Length == 2)
+            ? (Is_Jump) ? ADDRMODE_INDIRECT : ADDRMODE_ABSOLUTE
+            : ADDRMODE_ZEROPAGE;
       }
    }
    else if(Operands.Data[0] >= '0' && Operands.Data[0] <= '9')
@@ -130,7 +132,6 @@ static instruction_data Parse_Instruction_Data(string Operands, bool Is_Branch)
    }
    else // Label
    {
-      // TODO: Determine if this is actually a relative address.
       if(Is_Branch)
       {
          Result.Addressing_Mode = ADDRMODE_RELATIVE;
@@ -191,103 +192,76 @@ typedef enum {
    OPCODE_BCS = 0xB0,
    OPCODE_BNE = 0xD0,
    OPCODE_BEQ = 0xF0,
+
+   // Special case.
+   OPCODE_JSR = 0x20,
 } opcode_pattern;
 
+typedef enum {
+   INSTRCODE_GROUP3 = 0x00,
+   INSTRCODE_GROUP1 = 0x01,
+   INSTRCODE_GROUP2 = 0x02,
+   INSTRCODE_BRANCH = 0x03, // Only for identification, not part of encoding.
+   INSTRCODE_JSR    = 0x04  // Only for identification, not part of encoding.
+} instruction_group_code;
+
 // TODO: Mark illegal indices with unused value.
-static u8 Group1_Addr_Patterns[ADDRMODE_COUNT] =
+static u8 Addressing_Mode_Patterns[][ADDRMODE_COUNT] =
 {
-   [ADDRMODE_INDIRECTX]   = 0x0,
-   [ADDRMODE_ZEROPAGE]    = 0x1,
-   [ADDRMODE_IMMEDIATE]   = 0x2,
-   [ADDRMODE_ABSOLUTE]    = 0x3,
-   [ADDRMODE_INDIRECTY]   = 0x4,
-   [ADDRMODE_ZEROPAGEX]   = 0x5,
-   [ADDRMODE_ABSOLUTEY]   = 0x6,
-   [ADDRMODE_ABSOLUTEX]   = 0x7,
-};
-
-static u8 Group2_Addr_Patterns[ADDRMODE_COUNT] =
-{
-   [ADDRMODE_IMMEDIATE]   = 0x0,
-   [ADDRMODE_ZEROPAGE]    = 0x1,
-   [ADDRMODE_ACCUMULATOR] = 0x2,
-   [ADDRMODE_ABSOLUTE]    = 0x3,
-   [ADDRMODE_ZEROPAGEX]   = 0x5,
-   [ADDRMODE_ABSOLUTEX]   = 0x7,
-};
-
-static u8 Group3_Addr_Patterns[ADDRMODE_COUNT] =
-{
-   [ADDRMODE_IMMEDIATE] = 0x0,
-   [ADDRMODE_ZEROPAGE]  = 0x1,
-   [ADDRMODE_ABSOLUTE]  = 0x3,
-   [ADDRMODE_ZEROPAGEX] = 0x5,
-   [ADDRMODE_ABSOLUTEX] = 0x7,
-};
-
-static machine_instruction Generate_Group1(opcode_pattern Opcode, string Operands)
-{
-   // Byte layout: aaabbbcc (aaa = GROUP1_OPCODE, bbb = GROUP1_ADDRMODE, cc = 01)
-
-   instruction_data Data = Parse_Instruction_Data(Operands, false);
-   u8 Addressing_Code = Group1_Addr_Patterns[Data.Addressing_Mode];
-   u8 CC = 0x01;
-
-   machine_instruction Result = {0};
-   Result.Length = 1 + Data.Length;
-   Result.Bytes[0] = (Opcode << 5) | (Addressing_Code << 2) | CC;
-   Result.Bytes[1] = Data.Bytes[0];
-   Result.Bytes[2] = Data.Bytes[1];
-
-   return(Result);
-}
-
-static machine_instruction Generate_Group2(opcode_pattern Opcode, string Operands)
-{
-   // Byte layout: aaabbbcc (aaa = GROUP2_OPCODE, bbb = GROUP2_ADDRMODE, cc = 10)
-
-   instruction_data Data = Parse_Instruction_Data(Operands, false);
-   u8 Addressing_Code = Group2_Addr_Patterns[Data.Addressing_Mode];
-   u8 CC = 0x02;
-
-   machine_instruction Result = {0};
-   Result.Length = 1 + Data.Length;
-   Result.Bytes[0] = (Opcode << 5) | (Addressing_Code << 2) | CC;
-   Result.Bytes[1] = Data.Bytes[0];
-   Result.Bytes[2] = Data.Bytes[1];
-
-   return(Result);
-}
-
-static machine_instruction Generate_Group3(opcode_pattern Opcode, string Operands)
-{
-   // Byte layout: aaabbbcc (aaa = GROUP3_OPCODE, bbb = GROUP3_ADDRMODE, cc = 00)
-
-   instruction_data Data = Parse_Instruction_Data(Operands, false);
-   u8 Addressing_Code = Group3_Addr_Patterns[Data.Addressing_Mode];
-   u8 CC = 0x00;
-   if(Opcode == OPCODE_JMP && Data.Addressing_Mode == ADDRMODE_ABSOLUTE)
+   [INSTRCODE_GROUP1] =
    {
-      Opcode = OPCODE_JMPABS;
-   }
+      [ADDRMODE_INDIRECTX]   = 0x0,
+      [ADDRMODE_ZEROPAGE]    = 0x1,
+      [ADDRMODE_IMMEDIATE]   = 0x2,
+      [ADDRMODE_ABSOLUTE]    = 0x3,
+      [ADDRMODE_INDIRECTY]   = 0x4,
+      [ADDRMODE_ZEROPAGEX]   = 0x5,
+      [ADDRMODE_ABSOLUTEY]   = 0x6,
+      [ADDRMODE_ABSOLUTEX]   = 0x7,
+   },
+   [INSTRCODE_GROUP2] =
+   {
+      [ADDRMODE_IMMEDIATE]   = 0x0,
+      [ADDRMODE_ZEROPAGE]    = 0x1,
+      [ADDRMODE_ACCUMULATOR] = 0x2,
+      [ADDRMODE_ABSOLUTE]    = 0x3,
+      [ADDRMODE_ZEROPAGEX]   = 0x5,
+      [ADDRMODE_ABSOLUTEX]   = 0x7,
+   },
+   [INSTRCODE_GROUP3] =
+   {
+      [ADDRMODE_IMMEDIATE] = 0x0,
+      [ADDRMODE_ZEROPAGE]  = 0x1,
+      [ADDRMODE_ABSOLUTE]  = 0x3,
+      [ADDRMODE_ZEROPAGEX] = 0x5,
+      [ADDRMODE_ABSOLUTEX] = 0x7,
+   },
+   [INSTRCODE_BRANCH] = {0},
+};
+
+static machine_instruction Encode(opcode_pattern Opcode, string Operands, instruction_group_code Group_Code)
+{
+   // Group 1 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 01)
+   // Group 2 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 10)
+   // Group 3 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 00)
+   // Branch layout:  xxy10000 (xx = FLAG, y = TAKEN)
+
+   // NOTE: Instruction jsr is a special case that doesn't follow the other
+   // group encoding patterns, so we just use opcode directly.
+
+   bool Is_Branch = (Group_Code == INSTRCODE_BRANCH);
+   bool Is_Jump = (Group_Code == INSTRCODE_GROUP3 && Opcode == OPCODE_JMP);
+
+   instruction_data Data = Parse_Operands(Operands, Is_Branch, Is_Jump);
+   u8 Addressing_Code = Addressing_Mode_Patterns[Group_Code][Data.Addressing_Mode];
 
    machine_instruction Result = {0};
    Result.Length = 1 + Data.Length;
-   Result.Bytes[0] = (Opcode << 5) | (Addressing_Code << 2) | CC;
+   Result.Bytes[0] = (Is_Branch || Group_Code == INSTRCODE_JSR)
+      ? Opcode
+      : (Opcode << 5) | (Addressing_Code << 2) | Group_Code;
    Result.Bytes[1] = Data.Bytes[0];
    Result.Bytes[2] = Data.Bytes[1];
-
-   return(Result);
-}
-
-static machine_instruction Generate_Branch(opcode_pattern Opcode, string Operands)
-{
-   instruction_data Data = Parse_Instruction_Data(Operands, true);
-
-   machine_instruction Result = {0};
-   Result.Length = 1 + Data.Length;
-   Result.Bytes[0] = Opcode;
-   Result.Bytes[1] = Data.Bytes[0];
 
    return(Result);
 }
@@ -307,42 +281,44 @@ static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
       string Operands = Trim_Left(Instruction_Operands.After);
 
       // Group 1 instructions.
-      if     (Equals(Mnemonic, S("ora"))) Result = Generate_Group1(OPCODE_ORA, Operands);
-      else if(Equals(Mnemonic, S("and"))) Result = Generate_Group1(OPCODE_AND, Operands);
-      else if(Equals(Mnemonic, S("eor"))) Result = Generate_Group1(OPCODE_EOR, Operands);
-      else if(Equals(Mnemonic, S("adc"))) Result = Generate_Group1(OPCODE_ADC, Operands);
-      else if(Equals(Mnemonic, S("sta"))) Result = Generate_Group1(OPCODE_STA, Operands);
-      else if(Equals(Mnemonic, S("lda"))) Result = Generate_Group1(OPCODE_LDA, Operands);
-      else if(Equals(Mnemonic, S("cmp"))) Result = Generate_Group1(OPCODE_CMP, Operands);
-      else if(Equals(Mnemonic, S("sbc"))) Result = Generate_Group1(OPCODE_SBC, Operands);
+      if     (Equals(Mnemonic, S("ora"))) Result = Encode(OPCODE_ORA, Operands, INSTRCODE_GROUP1);
+      else if(Equals(Mnemonic, S("and"))) Result = Encode(OPCODE_AND, Operands, INSTRCODE_GROUP1);
+      else if(Equals(Mnemonic, S("eor"))) Result = Encode(OPCODE_EOR, Operands, INSTRCODE_GROUP1);
+      else if(Equals(Mnemonic, S("adc"))) Result = Encode(OPCODE_ADC, Operands, INSTRCODE_GROUP1);
+      else if(Equals(Mnemonic, S("sta"))) Result = Encode(OPCODE_STA, Operands, INSTRCODE_GROUP1);
+      else if(Equals(Mnemonic, S("lda"))) Result = Encode(OPCODE_LDA, Operands, INSTRCODE_GROUP1);
+      else if(Equals(Mnemonic, S("cmp"))) Result = Encode(OPCODE_CMP, Operands, INSTRCODE_GROUP1);
+      else if(Equals(Mnemonic, S("sbc"))) Result = Encode(OPCODE_SBC, Operands, INSTRCODE_GROUP1);
 
       // Group 2 instructions.
-      else if(Equals(Mnemonic, S("asl"))) Result = Generate_Group2(OPCODE_ASL, Operands);
-      else if(Equals(Mnemonic, S("rol"))) Result = Generate_Group2(OPCODE_ROL, Operands);
-      else if(Equals(Mnemonic, S("lsr"))) Result = Generate_Group2(OPCODE_LSR, Operands);
-      else if(Equals(Mnemonic, S("ror"))) Result = Generate_Group2(OPCODE_ROR, Operands);
-      else if(Equals(Mnemonic, S("stx"))) Result = Generate_Group2(OPCODE_STX, Operands);
-      else if(Equals(Mnemonic, S("ldx"))) Result = Generate_Group2(OPCODE_LDX, Operands);
-      else if(Equals(Mnemonic, S("dec"))) Result = Generate_Group2(OPCODE_DEC, Operands);
-      else if(Equals(Mnemonic, S("inc"))) Result = Generate_Group2(OPCODE_INC, Operands);
+      else if(Equals(Mnemonic, S("asl"))) Result = Encode(OPCODE_ASL, Operands, INSTRCODE_GROUP2);
+      else if(Equals(Mnemonic, S("rol"))) Result = Encode(OPCODE_ROL, Operands, INSTRCODE_GROUP2);
+      else if(Equals(Mnemonic, S("lsr"))) Result = Encode(OPCODE_LSR, Operands, INSTRCODE_GROUP2);
+      else if(Equals(Mnemonic, S("ror"))) Result = Encode(OPCODE_ROR, Operands, INSTRCODE_GROUP2);
+      else if(Equals(Mnemonic, S("stx"))) Result = Encode(OPCODE_STX, Operands, INSTRCODE_GROUP2);
+      else if(Equals(Mnemonic, S("ldx"))) Result = Encode(OPCODE_LDX, Operands, INSTRCODE_GROUP2);
+      else if(Equals(Mnemonic, S("dec"))) Result = Encode(OPCODE_DEC, Operands, INSTRCODE_GROUP2);
+      else if(Equals(Mnemonic, S("inc"))) Result = Encode(OPCODE_INC, Operands, INSTRCODE_GROUP2);
 
       // Group 3 instructions.
-      else if(Equals(Mnemonic, S("bit"))) Result = Generate_Group3(OPCODE_BIT, Operands);
-      else if(Equals(Mnemonic, S("jmp"))) Result = Generate_Group3(OPCODE_JMP, Operands);
-      else if(Equals(Mnemonic, S("sty"))) Result = Generate_Group3(OPCODE_STY, Operands);
-      else if(Equals(Mnemonic, S("ldy"))) Result = Generate_Group3(OPCODE_LDY, Operands);
-      else if(Equals(Mnemonic, S("cpy"))) Result = Generate_Group3(OPCODE_CPY, Operands);
-      else if(Equals(Mnemonic, S("cpx"))) Result = Generate_Group3(OPCODE_CPX, Operands);
+      else if(Equals(Mnemonic, S("bit"))) Result = Encode(OPCODE_BIT, Operands, INSTRCODE_GROUP3);
+      else if(Equals(Mnemonic, S("jmp"))) Result = Encode(OPCODE_JMP, Operands, INSTRCODE_GROUP3);
+      else if(Equals(Mnemonic, S("sty"))) Result = Encode(OPCODE_STY, Operands, INSTRCODE_GROUP3);
+      else if(Equals(Mnemonic, S("ldy"))) Result = Encode(OPCODE_LDY, Operands, INSTRCODE_GROUP3);
+      else if(Equals(Mnemonic, S("cpy"))) Result = Encode(OPCODE_CPY, Operands, INSTRCODE_GROUP3);
+      else if(Equals(Mnemonic, S("cpx"))) Result = Encode(OPCODE_CPX, Operands, INSTRCODE_GROUP3);
 
       // Branch instructions.
-      else if(Equals(Mnemonic, S("bpl"))) Result = Generate_Branch(OPCODE_BPL, Operands);
-      else if(Equals(Mnemonic, S("bmi"))) Result = Generate_Branch(OPCODE_BMI, Operands);
-      else if(Equals(Mnemonic, S("bvc"))) Result = Generate_Branch(OPCODE_BVC, Operands);
-      else if(Equals(Mnemonic, S("bvs"))) Result = Generate_Branch(OPCODE_BVS, Operands);
-      else if(Equals(Mnemonic, S("bcc"))) Result = Generate_Branch(OPCODE_BCC, Operands);
-      else if(Equals(Mnemonic, S("bcs"))) Result = Generate_Branch(OPCODE_BCS, Operands);
-      else if(Equals(Mnemonic, S("bne"))) Result = Generate_Branch(OPCODE_BNE, Operands);
-      else if(Equals(Mnemonic, S("beq"))) Result = Generate_Branch(OPCODE_BEQ, Operands);
+      else if(Equals(Mnemonic, S("bpl"))) Result = Encode(OPCODE_BPL, Operands, INSTRCODE_BRANCH);
+      else if(Equals(Mnemonic, S("bmi"))) Result = Encode(OPCODE_BMI, Operands, INSTRCODE_BRANCH);
+      else if(Equals(Mnemonic, S("bvc"))) Result = Encode(OPCODE_BVC, Operands, INSTRCODE_BRANCH);
+      else if(Equals(Mnemonic, S("bvs"))) Result = Encode(OPCODE_BVS, Operands, INSTRCODE_BRANCH);
+      else if(Equals(Mnemonic, S("bcc"))) Result = Encode(OPCODE_BCC, Operands, INSTRCODE_BRANCH);
+      else if(Equals(Mnemonic, S("bcs"))) Result = Encode(OPCODE_BCS, Operands, INSTRCODE_BRANCH);
+      else if(Equals(Mnemonic, S("bne"))) Result = Encode(OPCODE_BNE, Operands, INSTRCODE_BRANCH);
+      else if(Equals(Mnemonic, S("beq"))) Result = Encode(OPCODE_BEQ, Operands, INSTRCODE_BRANCH);
+
+      else if(Equals(Mnemonic, S("jsr"))) Result = Encode(OPCODE_JSR, Operands, INSTRCODE_JSR);
    }
    else
    {
