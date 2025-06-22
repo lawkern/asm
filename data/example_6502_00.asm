@@ -13,14 +13,15 @@ main: #api
     \ the default for non-prefixed integers). Memory references use brackets.
 
     lda 0x01                    \ Load immediate value into a
-    lda [0x01]                  \ Load byte at zero page address into a
-    lda [0x01 + x]              \ Load byte at zero page address + x-offset into a
+test1:  lda [0x01]              \ Load byte at zero page address into a
+test2:  lda [0x01 + x]          \ Load byte at zero page address + x-offset into a
     lda [0x0123]                \ Load byte at absolute address into a
     lda [0x0123 + x]            \ Load byte at absolute address + x-offset into a
     lda [0x0123 + y]            \ Load byte at absolute address + y-offset into a
     lda [[0x01 + x]]            \ Load byte at indexed indirect into a
     lda [[0x01] + y]            \ Load byte at indirect indexed into a
 
+test3:
     sta [0x01]                  \ Store a at zero page address
     sta [0x01 + x]              \ Store a at zero page address + x-offset
     sta [0x0123]                \ Store a at absolute address
