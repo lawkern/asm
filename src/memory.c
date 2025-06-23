@@ -50,7 +50,7 @@ typedef struct {
    index Length;
 } string;
 
-#define S(String) (string){(String), sizeof(String)-1}
+#define S(Literal) (string){(u8 *)(Literal), sizeof(Literal)-1}
 
 static string Span(u8 *Begin, u8 *End)
 {

@@ -13,15 +13,15 @@ main: #api
     \ the default for non-prefixed integers). Memory references use brackets.
 
     lda 0x01                    \ Load immediate value into a
-test1:  lda [0x01]              \ Load byte at zero page address into a
-test2:  lda [0x01 + x]          \ Load byte at zero page address + x-offset into a
+Test1:  lda [0x01]              \ Load byte at zero page address into a
+Test2:  lda [0x01 + x]          \ Load byte at zero page address + x-offset into a
     lda [0x0123]                \ Load byte at absolute address into a
     lda [0x0123 + x]            \ Load byte at absolute address + x-offset into a
     lda [0x0123 + y]            \ Load byte at absolute address + y-offset into a
     lda [[0x01 + x]]            \ Load byte at indexed indirect into a
     lda [[0x01] + y]            \ Load byte at indirect indexed into a
 
-test3:
+Test3:
     sta [0x01]                  \ Store a at zero page address
     sta [0x01 + x]              \ Store a at zero page address + x-offset
     sta [0x0123]                \ Store a at absolute address
@@ -126,6 +126,12 @@ test3:
     jmp 0x0123                  \ Jump to absolute address
     jmp [0x0123]                \ Jump to indirect address
 
+Jmp_Address:
+    jmp 0x0123                  \ Jump to absolute address
+    jmp [0x0123]                \ Jump to indirect address
+    jmp Jmp_Address
+    jmp [Jmp_Address]
+
     ldy 0x01                    \ Immediate
     ldy [0x01]                  \ Zero page address
     ldy [0x01 + x]              \ Zero page address + x-offset
@@ -144,7 +150,6 @@ test3:
     cpx [0x01]                  \ Zero page address
     cpx [0x0123]                \ Absolute address
 
-.loop:
     \ Branch to relative address (by immediate)
     bpl 0x01
     bmi 0x01
@@ -155,15 +160,16 @@ test3:
     bne 0x01
     beq 0x01
 
+    .Loop:
     \ Branch to relative address (by label)
-    bpl .loop
-    bmi .loop
-    bvc .loop
-    bvs .loop
-    bcc .loop
-    bcs .loop
-    bne .loop
-    beq .loop
+    bpl .Loop
+    bmi .Loop
+    bvc .Loop
+    bvs .Loop
+    bcc .Loop
+    bcs .Loop
+    bne .Loop
+    beq .Loop
 
     brk
     rti

@@ -1,3 +1,5 @@
+CFLAGS = -g -Wall -Wextra -Wno-unused-function
+
 compile:
 	mkdir -p build
 	$(CC) -o build/asm_6502   $(CFLAGS) -DARCH_6502   src/main.c $(LDFLAGS)

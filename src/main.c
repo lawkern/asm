@@ -22,19 +22,21 @@ static void Report_Error(char *Message, ...)
 
 typedef struct {
    string Label;
-   string Instruction;
-   string Directive;
+   index Address;
+} label_address;
 
-   int Number;
-} asm_line;
+static int Label_Address_Count;
+static label_address Label_Addresses[512];
 
 typedef struct {
-   u64 Address;
    int Length;
    u8 Bytes[16];
+
+   string Label_Operand;
 } machine_instruction;
 
-#define GENERATE_MACHINE_INSTRUCTION(Name) machine_instruction Name(asm_line Line)
+#define GENERATE_MACHINE_INSTRUCTION(Name) machine_instruction Name(string Instruction)
+#define PATCH_LABEL_ADDRESS(Name) void Name(machine_instruction *Result, index Instruction_Address, index Label_Address)
 
 #if ARCH_6502
 #   include "architecture_6502.c"
@@ -43,6 +45,54 @@ typedef struct {
 #else
 #   error Unhandled architecture.
 #endif
+
+typedef struct {
+   char *Source_Code_Path;
+   int Source_Code_Line_Number;
+
+   string Label;
+   string Instruction;
+   string Directive;
+
+   index Machine_Address;
+   machine_instruction Machine_Instruction;
+} source_code_line;
+
+static void Print_Instruction(source_code_line *Line)
+{
+   printf("%s:%-4d | ", Line->Source_Code_Path, Line->Source_Code_Line_Number);
+
+   if(Line->Machine_Instruction.Length)
+   {
+      printf("0x%04x: ", (u32)Line->Machine_Address);
+      for(int Index = 0; Index < Line->Machine_Instruction.Length; ++Index)
+      {
+         printf("%02x ", Line->Machine_Instruction.Bytes[Index]);
+      }
+      for(int Index = 4; Index >= (Line->Machine_Instruction.Length); --Index)
+      {
+         printf("   ");
+      }
+   }
+   else
+   {
+      printf("                       ");
+   }
+   printf(" | ");
+
+   printf("%-20.*s | ", (int)Line->Instruction.Length, Line->Instruction.Data);
+
+   if(Line->Label.Length)
+   {
+      printf("Label('%.*s') ", (int)Line->Label.Length, Line->Label.Data);
+   }
+   if(Line->Directive.Length)
+   {
+      printf("Directive('%.*s') ", (int)Line->Directive.Length, Line->Directive.Data);
+   }
+
+   printf("\n");
+}
 
 int main(int Argument_Count, char **Arguments)
 {
@@ -53,53 +103,56 @@ int main(int Argument_Count, char **Arguments)
    // NOTE: For now, assume that all provided arguments are input files.
    for(int Input_Index = 1; Input_Index < Argument_Count; ++Input_Index)
    {
-      char *Path = Arguments[Input_Index];
-      printf("Input_File_%02d: %s\n", Input_Index, Path);
+      char *Source_Code_Path = Arguments[Input_Index];
+      string Source_Code = Read_Entire_File(&Arena, Source_Code_Path);
 
-      string Source = Read_Entire_File(&Arena, Path);
+      // First pass to determine the number of lines to allocate. This will
+      // include any non-empty line of source code.
 
+      int Line_Count = 0;
       cut Source_Cut = {0};
-      int Line_Count = 0; // Number of lines to allocate.
-
-      Source_Cut.After = Source;
-      while(Source_Cut.After.Length)
-      {
-         Source_Cut = Cut(Source_Cut.After, '\n');
-         cut Line_With_Comments = Cut(Source_Cut.Before, '\\');
-         string Text = Trim(Line_With_Comments.Before);
-         Line_Count += (Text.Length > 0);
-      }
-
-      asm_line *Lines = Allocate(&Arena, asm_line, Line_Count);
-      int Line_Index = 0;  // Index of allocated source line to populate.
-      int Line_Number = 1; // Line number position in source file.
-
-      Source_Cut.After = Source;
+      Source_Cut.After = Source_Code;
       while(Source_Cut.After.Length)
       {
          Source_Cut = Cut(Source_Cut.After, '\n');
          cut Comment = Cut(Source_Cut.Before, '\\');
+         Line_Count += (Trim(Comment.Before).Length > 0);
+      }
 
-         asm_line Line = {0};
-         Line.Number = Line_Number++;
+      // Second pass to identify directives, labels and instructions for each
+      // allocated line of assembly code.
 
+      source_code_line *Lines = Allocate(&Arena, source_code_line, Line_Count);
+      int Current_Line_Index = 0;  // Index of allocated source line to populate.
+      int Source_Line_Number = 1;
+
+      Source_Cut.After = Source_Code;
+      while(Source_Cut.After.Length)
+      {
+         Source_Cut = Cut(Source_Cut.After, '\n');
+         cut Comment = Cut(Source_Cut.Before, '\\');
          string Text = Trim(Comment.Before);
+
+         source_code_line Line = {0};
+         Line.Source_Code_Path = Source_Code_Path;
+         Line.Source_Code_Line_Number = Source_Line_Number++;
+
          if(Text.Length > 0)
          {
-            if(Text.Data[0] == '#')
+            if(Has_Prefix_Then_Remove(&Text, S("#")))
             {
-               // If a line begins with '#', it's a directive that extends to
-               // the end of the line, e.g. "#section text".
-               cut Directive = Cut(Text, '#');
-               Line.Directive = Trim(Directive.After);
+               // NOTE: If a line begins with '#', it's a directive that extends
+               // to the end of the line, e.g. "#section text".
+               Line.Directive = Trim_Left(Text);
             }
             else
             {
+               // NOTE: Labels are required to end with a colon.
                cut Label = Cut(Text, ':');
                if(Label.Found)
                {
-                  Line.Label = Trim(Label.Before);
-                  Text = Trim(Label.After);
+                  Line.Label = Label.Before;
+                  Text = Trim_Left(Label.After);
                }
 
                cut Directive = Cut(Text, '#');
@@ -110,33 +163,61 @@ int main(int Argument_Count, char **Arguments)
                }
             }
 
-            Lines[Line_Index++] = Line;
+            Lines[Current_Line_Index++] = Line;
+         }
+      }
+
+      // Third pass to generate machine code based on identified assembly
+      // instructions. The address associated with each label is stored.
+
+      index Machine_Address = 0;
+      for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
+      {
+         source_code_line *Line = Lines + Line_Index;
+         Line->Machine_Address = Machine_Address;
+
+         if(Line->Label.Length)
+         {
+            label_address Label_Address = {0};
+            Label_Address.Label = Line->Label;
+            Label_Address.Address = Line->Machine_Address;
+            Label_Addresses[Label_Address_Count++] = Label_Address;
+         }
+
+         if(Line->Instruction.Length)
+         {
+            Line->Machine_Instruction = Generate_Machine_Instruction(Line->Instruction);
+            Line->Machine_Address = Machine_Address;
+
+            Machine_Address += Line->Machine_Instruction.Length;
+         }
+      }
+
+      // Fourth pass to patch addresses into any instructions that reference
+      // labels.
+      for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
+      {
+         source_code_line *Line = Lines + Line_Index;
+         if(Line->Machine_Instruction.Label_Operand.Length)
+         {
+            // TODO: Smarter lookup.
+            index Label_Address = 0xFF;
+            for(int Label_Index = 0; Label_Index < Label_Address_Count; ++Label_Index)
+            {
+               label_address *A = Label_Addresses + Label_Index;
+               if(Equals(A->Label, Line->Machine_Instruction.Label_Operand))
+               {
+                  Label_Address = A->Address;
+               }
+            }
+
+            Patch_Label_Address(&Line->Machine_Instruction, Line->Machine_Address, Label_Address);
          }
       }
 
       for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
       {
-         asm_line Line = Lines[Line_Index];
-         printf("L%03d | ", Line.Number);
-
-         if(Line.Instruction.Length)
-         {
-            machine_instruction Machine_Instruction = Generate_Machine_Instruction(Line);
-            for(int Index = 0; Index < Machine_Instruction.Length; ++Index)
-            {
-               printf("%02x ", Machine_Instruction.Bytes[Index]);
-            }
-         }
-         if(Line.Label.Length)
-         {
-            printf("(LABEL: '%.*s') ", Line.Label.Length, Line.Label.Data);
-         }
-         if(Line.Directive.Length)
-         {
-            printf("(DIRECTIVE: '%.*s') ", Line.Directive.Length, Line.Directive.Data);
-         }
-
-         printf("\n");
+         Print_Instruction(Lines + Line_Index);
       }
    }
 

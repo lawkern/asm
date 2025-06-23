@@ -34,26 +34,26 @@ typedef enum {
    ADDRMODE_FLAG_RELATIVE    = (1 << ADDRMODE_RELATIVE),
 } addressing_mode_flag;
 
-static char *Addressing_Mode_Names[ADDRMODE_COUNT] =
-{
-   [ADDRMODE_IMPLIED]     = "Implied",
-   [ADDRMODE_ACCUMULATOR] = "Accumulator",
-   [ADDRMODE_IMMEDIATE]   = "Immediate",
-   [ADDRMODE_ZEROPAGE]    = "Zero Page",
-   [ADDRMODE_ZEROPAGEX]   = "Zero Page + X",
-   [ADDRMODE_ZEROPAGEY]   = "Zero Page + Y",
-   [ADDRMODE_ABSOLUTE]    = "Absolute Address",
-   [ADDRMODE_ABSOLUTEX]   = "Absolute Address + X",
-   [ADDRMODE_ABSOLUTEY]   = "Absolute Address + Y",
-   [ADDRMODE_INDIRECT]    = "Indirect Address",
-   [ADDRMODE_INDIRECTX]   = "Indirect Address + X",
-   [ADDRMODE_INDIRECTY]   = "Indirect Address + Y",
-   [ADDRMODE_RELATIVE]    = "Relative Address",
-};
+// static char *Addressing_Mode_Names[ADDRMODE_COUNT] =
+// {
+//    [ADDRMODE_IMPLIED]     = "Implied",
+//    [ADDRMODE_ACCUMULATOR] = "Accumulator",
+//    [ADDRMODE_IMMEDIATE]   = "Immediate",
+//    [ADDRMODE_ZEROPAGE]    = "Zero Page",
+//    [ADDRMODE_ZEROPAGEX]   = "Zero Page + X",
+//    [ADDRMODE_ZEROPAGEY]   = "Zero Page + Y",
+//    [ADDRMODE_ABSOLUTE]    = "Absolute Address",
+//    [ADDRMODE_ABSOLUTEX]   = "Absolute Address + X",
+//    [ADDRMODE_ABSOLUTEY]   = "Absolute Address + Y",
+//    [ADDRMODE_INDIRECT]    = "Indirect Address",
+//    [ADDRMODE_INDIRECTX]   = "Indirect Address + X",
+//    [ADDRMODE_INDIRECTY]   = "Indirect Address + Y",
+//    [ADDRMODE_RELATIVE]    = "Relative Address",
+// };
 
 typedef struct {
    addressing_mode Addressing_Mode;
-   string Label;
+   string Label_Operand;
 
    int Length;
    u8 Bytes[2];
@@ -61,17 +61,32 @@ typedef struct {
    bool Ok;
 } instruction_data;
 
-static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Number)
+static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Operands, bool Is_Branch)
 {
-   parsed_u32 Parsed_Number = Parse_U32(Number);
-   if(Parsed_Number.Ok)
+   bool Ok = false;
+
+   if(Operands.Length && Operands.Data[0] >= '0' && Operands.Data[0] <= '9')
    {
-      Result->Bytes[0] = (u8)Parsed_Number.Value;
-      Result->Bytes[1] = (u8)(Parsed_Number.Value >> 8);
-      Result->Length = Result->Bytes[1] ? 2 : 1;
+      // Number literal
+      parsed_u32 Parsed_Number = Parse_U32(Operands);
+      if(Parsed_Number.Ok)
+      {
+         Result->Bytes[0] = (u8)Parsed_Number.Value;
+         Result->Bytes[1] = (u8)(Parsed_Number.Value >> 8);
+         Result->Length = Result->Bytes[1] ? 2 : 1;
+         Ok = true;
+      }
+   }
+   else
+   {
+      // Label (to be populated later)
+      Result->Bytes[0] = 0xBE;
+      Result->Bytes[1] = 0xEF;
+      Result->Label_Operand = Operands;
+      Result->Length = (Is_Branch) ? 1 : 2;
    }
 
-   return(Parsed_Number.Ok);
+   return(Ok);
  }
 
 static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_Jump)
@@ -95,29 +110,29 @@ static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_
       if(Has_Suffix_Then_Remove(&Operands, S(" + x]]")))
       {
          Result.Addressing_Mode = ADDRMODE_INDIRECTX;
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
       }
       else if(Has_Suffix_Then_Remove(&Operands, S("] + y]")))
       {
          Result.Addressing_Mode = ADDRMODE_INDIRECTY;
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
       }
    }
    else if(Has_Prefix_Then_Remove(&Operands, S("[")))
    {
       if(Has_Suffix_Then_Remove(&Operands, S(" + x]")))
       {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
          Result.Addressing_Mode = (Result.Length == 2) ? ADDRMODE_ABSOLUTEX : ADDRMODE_ZEROPAGEX;
       }
       else if(Has_Suffix_Then_Remove(&Operands, S(" + y]")))
       {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
          Result.Addressing_Mode = (Result.Length == 2) ? ADDRMODE_ABSOLUTEY : ADDRMODE_ZEROPAGEY;
       }
       else if(Has_Suffix_Then_Remove(&Operands, S("]")))
       {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
          Result.Addressing_Mode = (Result.Length == 2)
             ? (Is_Jump) ? ADDRMODE_INDIRECT : ADDRMODE_ABSOLUTE
             : ADDRMODE_ZEROPAGE;
@@ -125,30 +140,16 @@ static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_
    }
    else if(Operands.Data[0] >= '0' && Operands.Data[0] <= '9')
    {
-      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands);
+      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
       Result.Addressing_Mode = (Result.Length == 2)
          ? ADDRMODE_ABSOLUTE
          : (Is_Branch) ? ADDRMODE_RELATIVE : ADDRMODE_IMMEDIATE;
    }
    else // Label
    {
-      if(Is_Branch)
-      {
-         Result.Addressing_Mode = ADDRMODE_RELATIVE;
-         Result.Length = 1;
-      }
-      else
-      {
-         Result.Addressing_Mode = ADDRMODE_ABSOLUTE;
-         Result.Length = 2;
-      }
-
-      // TODO: Populate bytes with computed label address.
-      Result.Bytes[0] = 0xBE;
-      Result.Bytes[1] = 0xEF;
+      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+      Result.Addressing_Mode = (Is_Branch) ? ADDRMODE_RELATIVE : ADDRMODE_ABSOLUTE;
    }
-
-   printf("%-20s | ", Addressing_Mode_Names[Result.Addressing_Mode]);
 
    return(Result);
 }
@@ -254,6 +255,7 @@ static machine_instruction Encode(opcode_pattern Opcode, string Operands, instru
 
    instruction_data Data = Parse_Operands(Operands, Is_Branch, Is_Jump);
    u8 Addressing_Code = Addressing_Mode_Patterns[Group_Code][Data.Addressing_Mode];
+   // printf("%-20s | ", Addressing_Mode_Names[Data.Addressing_Mode]);
 
    machine_instruction Result = {0};
    Result.Length = 1 + Data.Length;
@@ -262,6 +264,7 @@ static machine_instruction Encode(opcode_pattern Opcode, string Operands, instru
       : (Opcode << 5) | (Addressing_Code << 2) | Group_Code;
    Result.Bytes[1] = Data.Bytes[0];
    Result.Bytes[2] = Data.Bytes[1];
+   Result.Label_Operand = Data.Label_Operand;
 
    return(Result);
 }
@@ -269,12 +272,10 @@ static machine_instruction Encode(opcode_pattern Opcode, string Operands, instru
 static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
 {
    machine_instruction Result = {0};
-   printf("%-16.*s | ", Line.Instruction.Length, Line.Instruction.Data);
 
    // TODO: Collapse all this down into a hash table or something.
-
    // TODO: Support other whitespace characters.
-   cut Instruction_Operands = Cut(Line.Instruction, ' ');
+   cut Instruction_Operands = Cut(Instruction, ' ');
    if(Instruction_Operands.Found)
    {
       string Mnemonic = Instruction_Operands.Before;
@@ -323,37 +324,53 @@ static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
    else
    {
       // Single-byte instructions.
-      if     (Equals(Line.Instruction, S("brk"))) Result.Bytes[Result.Length++] = 0x00;
-      else if(Equals(Line.Instruction, S("rti"))) Result.Bytes[Result.Length++] = 0x40;
-      else if(Equals(Line.Instruction, S("rts"))) Result.Bytes[Result.Length++] = 0x60;
+      if     (Equals(Instruction, S("brk"))) Result.Bytes[Result.Length++] = 0x00;
+      else if(Equals(Instruction, S("rti"))) Result.Bytes[Result.Length++] = 0x40;
+      else if(Equals(Instruction, S("rts"))) Result.Bytes[Result.Length++] = 0x60;
 
-      else if(Equals(Line.Instruction, S("php"))) Result.Bytes[Result.Length++] = 0x08;
-      else if(Equals(Line.Instruction, S("plp"))) Result.Bytes[Result.Length++] = 0x28;
-      else if(Equals(Line.Instruction, S("pha"))) Result.Bytes[Result.Length++] = 0x48;
-      else if(Equals(Line.Instruction, S("pla"))) Result.Bytes[Result.Length++] = 0x68;
-      else if(Equals(Line.Instruction, S("dey"))) Result.Bytes[Result.Length++] = 0x88;
-      else if(Equals(Line.Instruction, S("tay"))) Result.Bytes[Result.Length++] = 0xA8;
-      else if(Equals(Line.Instruction, S("iny"))) Result.Bytes[Result.Length++] = 0xC8;
-      else if(Equals(Line.Instruction, S("inx"))) Result.Bytes[Result.Length++] = 0xE8;
+      else if(Equals(Instruction, S("php"))) Result.Bytes[Result.Length++] = 0x08;
+      else if(Equals(Instruction, S("plp"))) Result.Bytes[Result.Length++] = 0x28;
+      else if(Equals(Instruction, S("pha"))) Result.Bytes[Result.Length++] = 0x48;
+      else if(Equals(Instruction, S("pla"))) Result.Bytes[Result.Length++] = 0x68;
+      else if(Equals(Instruction, S("dey"))) Result.Bytes[Result.Length++] = 0x88;
+      else if(Equals(Instruction, S("tay"))) Result.Bytes[Result.Length++] = 0xA8;
+      else if(Equals(Instruction, S("iny"))) Result.Bytes[Result.Length++] = 0xC8;
+      else if(Equals(Instruction, S("inx"))) Result.Bytes[Result.Length++] = 0xE8;
 
-      else if(Equals(Line.Instruction, S("clc"))) Result.Bytes[Result.Length++] = 0x18;
-      else if(Equals(Line.Instruction, S("sec"))) Result.Bytes[Result.Length++] = 0x38;
-      else if(Equals(Line.Instruction, S("cli"))) Result.Bytes[Result.Length++] = 0x58;
-      else if(Equals(Line.Instruction, S("sei"))) Result.Bytes[Result.Length++] = 0x78;
-      else if(Equals(Line.Instruction, S("tya"))) Result.Bytes[Result.Length++] = 0x98;
-      else if(Equals(Line.Instruction, S("clv"))) Result.Bytes[Result.Length++] = 0xB8;
-      else if(Equals(Line.Instruction, S("cld"))) Result.Bytes[Result.Length++] = 0xD8;
-      else if(Equals(Line.Instruction, S("sed"))) Result.Bytes[Result.Length++] = 0xF8;
+      else if(Equals(Instruction, S("clc"))) Result.Bytes[Result.Length++] = 0x18;
+      else if(Equals(Instruction, S("sec"))) Result.Bytes[Result.Length++] = 0x38;
+      else if(Equals(Instruction, S("cli"))) Result.Bytes[Result.Length++] = 0x58;
+      else if(Equals(Instruction, S("sei"))) Result.Bytes[Result.Length++] = 0x78;
+      else if(Equals(Instruction, S("tya"))) Result.Bytes[Result.Length++] = 0x98;
+      else if(Equals(Instruction, S("clv"))) Result.Bytes[Result.Length++] = 0xB8;
+      else if(Equals(Instruction, S("cld"))) Result.Bytes[Result.Length++] = 0xD8;
+      else if(Equals(Instruction, S("sed"))) Result.Bytes[Result.Length++] = 0xF8;
 
-      else if(Equals(Line.Instruction, S("txa"))) Result.Bytes[Result.Length++] = 0x8A;
-      else if(Equals(Line.Instruction, S("txs"))) Result.Bytes[Result.Length++] = 0x9A;
-      else if(Equals(Line.Instruction, S("tax"))) Result.Bytes[Result.Length++] = 0xAA;
-      else if(Equals(Line.Instruction, S("tsx"))) Result.Bytes[Result.Length++] = 0xBA;
-      else if(Equals(Line.Instruction, S("dex"))) Result.Bytes[Result.Length++] = 0xCA;
-      else if(Equals(Line.Instruction, S("nop"))) Result.Bytes[Result.Length++] = 0xEA;
+      else if(Equals(Instruction, S("txa"))) Result.Bytes[Result.Length++] = 0x8A;
+      else if(Equals(Instruction, S("txs"))) Result.Bytes[Result.Length++] = 0x9A;
+      else if(Equals(Instruction, S("tax"))) Result.Bytes[Result.Length++] = 0xAA;
+      else if(Equals(Instruction, S("tsx"))) Result.Bytes[Result.Length++] = 0xBA;
+      else if(Equals(Instruction, S("dex"))) Result.Bytes[Result.Length++] = 0xCA;
+      else if(Equals(Instruction, S("nop"))) Result.Bytes[Result.Length++] = 0xEA;
 
-      printf("%-20s | ", Addressing_Mode_Names[ADDRMODE_IMPLIED]);
+      // printf("%-20s | ", Addressing_Mode_Names[ADDRMODE_IMPLIED]);
    }
 
    return(Result);
+}
+
+static PATCH_LABEL_ADDRESS(Patch_Label_Address)
+{
+   if(Result->Length == 2)
+   {
+      // Relative address.
+      Result->Bytes[1] = (u8)(Label_Address - Instruction_Address);
+   }
+   else
+   {
+      // Absolute address.
+      assert(Result->Length == 3);
+      Result->Bytes[1] = (u8)(Label_Address >> 0);
+      Result->Bytes[2] = (u8)(Label_Address >> 8);
+   }
 }
