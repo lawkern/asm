@@ -193,11 +193,15 @@ int main(int Argument_Count, char **Arguments)
          }
       }
 
+      u8 *Output = Allocate(&Arena, u8, Machine_Address);
+      index Output_Machine_Address = 0;
+
       // Fourth pass to patch addresses into any instructions that reference
       // labels.
       for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
       {
          source_code_line *Line = Lines + Line_Index;
+
          if(Line->Machine_Instruction.Label_Operand.Length)
          {
             // TODO: Smarter lookup.
@@ -213,12 +217,30 @@ int main(int Argument_Count, char **Arguments)
 
             Patch_Label_Address(&Line->Machine_Instruction, Line->Machine_Address, Label_Address);
          }
+
+         for(int Byte_Index = 0; Byte_Index < Line->Machine_Instruction.Length; ++Byte_Index)
+         {
+            Output[Output_Machine_Address++] = Line->Machine_Instruction.Bytes[Byte_Index];
+         }
       }
 
-      for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
+      // for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
+      // {
+      //    Print_Instruction(Lines + Line_Index);
+      // }
+
+      cut File_Name = {0};
+      File_Name.After.Data = (u8 *)Source_Code_Path;
+      File_Name.After.Length = strlen(Source_Code_Path);
+      while(File_Name.After.Length)
       {
-         Print_Instruction(Lines + Line_Index);
+         File_Name = Cut(File_Name.After, '/');
       }
+      Has_Suffix_Then_Remove(&File_Name.Before, S(".asm"));
+
+      char Output_Path[256] = {0};
+      snprintf(Output_Path, sizeof(Output_Path), "%.*s.bin", (int)File_Name.Before.Length, File_Name.Before.Data);
+      Write_Entire_File(Output, Output_Machine_Address, Output_Path);
    }
 
    return(0);

@@ -239,3 +239,27 @@ static string Read_Entire_File(arena *Arena, char *Path)
 
    return(Result);
 }
+
+static bool Write_Entire_File(u8 *Memory, index Size, char *Path)
+{
+   bool Result = false;
+
+   FILE *File = fopen(Path, "wb");
+   if(File)
+   {
+      if(fwrite(Memory, 1, Size, File) == (size_t)Size)
+      {
+         // Success
+      }
+      else
+      {
+         Report_Error("Failed to write to output file \"%s\".", Path);
+      }
+   }
+   else
+   {
+      Report_Error("Failed to open output file \"%s\".", Path);
+   }
+
+   return(Result);
+}
