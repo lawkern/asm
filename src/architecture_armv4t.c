@@ -44,7 +44,7 @@ static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
 {
    (void)Instruction;
 
-   machine_instruction Result = {0};
+   machine_code Result = {0};
    return(Result);
 }
 

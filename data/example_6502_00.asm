@@ -4,7 +4,12 @@
 \\ indents to basic-offset.
 
 \\ Assembler directives begin with '#', in the style of the C preprocessor:
+#file example_6502_00.nes
 #arch 6502
+
+\\ NES header bytes.
+#bytes 0x4e 0x45 0x53 0x1a
+
 #section text
 #location 0x0100
 

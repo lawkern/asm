@@ -240,7 +240,7 @@ static u8 Addressing_Mode_Patterns[][ADDRMODE_COUNT] =
    [INSTRCODE_BRANCH] = {0},
 };
 
-static machine_instruction Encode(opcode_pattern Opcode, string Operands, instruction_group_code Group_Code)
+static machine_code Encode(opcode_pattern Opcode, string Operands, instruction_group_code Group_Code)
 {
    // Group 1 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 01)
    // Group 2 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 10)
@@ -257,7 +257,7 @@ static machine_instruction Encode(opcode_pattern Opcode, string Operands, instru
    u8 Addressing_Code = Addressing_Mode_Patterns[Group_Code][Data.Addressing_Mode];
    // printf("%-20s | ", Addressing_Mode_Names[Data.Addressing_Mode]);
 
-   machine_instruction Result = {0};
+   machine_code Result = {0};
    Result.Length = 1 + Data.Length;
    Result.Bytes[0] = (Is_Branch || Group_Code == INSTRCODE_JSR)
       ? Opcode
@@ -271,7 +271,7 @@ static machine_instruction Encode(opcode_pattern Opcode, string Operands, instru
 
 static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
 {
-   machine_instruction Result = {0};
+   machine_code Result = {0};
 
    // TODO: Collapse all this down into a hash table or something.
    // TODO: Support other whitespace characters.

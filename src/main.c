@@ -33,10 +33,10 @@ typedef struct {
    u8 Bytes[16];
 
    string Label_Operand;
-} machine_instruction;
+} machine_code;
 
-#define GENERATE_MACHINE_INSTRUCTION(Name) machine_instruction Name(string Instruction)
-#define PATCH_LABEL_ADDRESS(Name) void Name(machine_instruction *Result, index Instruction_Address, index Label_Address)
+#define GENERATE_MACHINE_INSTRUCTION(Name) machine_code Name(string Instruction)
+#define PATCH_LABEL_ADDRESS(Name) void Name(machine_code *Result, index Instruction_Address, index Label_Address)
 
 #if ARCH_6502
 #   include "architecture_6502.c"
@@ -47,7 +47,7 @@ typedef struct {
 #endif
 
 typedef struct {
-   char *Source_Code_Path;
+   string Source_Code_Path;
    int Source_Code_Line_Number;
 
    string Label;
@@ -55,21 +55,24 @@ typedef struct {
    string Directive;
 
    index Machine_Address;
-   machine_instruction Machine_Instruction;
+   machine_code Machine_Code;
 } source_code_line;
 
 static void Print_Instruction(source_code_line *Line)
 {
-   printf("%s:%-4d | ", Line->Source_Code_Path, Line->Source_Code_Line_Number);
+   printf("%.*s:%-4d | ",
+          (int)Line->Source_Code_Path.Length,
+          Line->Source_Code_Path.Data,
+          Line->Source_Code_Line_Number);
 
-   if(Line->Machine_Instruction.Length)
+   if(Line->Machine_Code.Length)
    {
       printf("0x%04x: ", (u32)Line->Machine_Address);
-      for(int Index = 0; Index < Line->Machine_Instruction.Length; ++Index)
+      for(int Index = 0; Index < Line->Machine_Code.Length; ++Index)
       {
-         printf("%02x ", Line->Machine_Instruction.Bytes[Index]);
+         printf("%02x ", Line->Machine_Code.Bytes[Index]);
       }
-      for(int Index = 4; Index >= (Line->Machine_Instruction.Length); --Index)
+      for(int Index = 4; Index >= (Line->Machine_Code.Length); --Index)
       {
          printf("   ");
       }
@@ -101,10 +104,13 @@ int main(int Argument_Count, char **Arguments)
    Arena.Base = malloc(Arena.Size);
 
    // NOTE: For now, assume that all provided arguments are input files.
-   for(int Input_Index = 1; Input_Index < Argument_Count; ++Input_Index)
+   for(int Argument_Index = 1; Argument_Index < Argument_Count; ++Argument_Index)
    {
-      char *Source_Code_Path = Arguments[Input_Index];
-      string Source_Code = Read_Entire_File(&Arena, Source_Code_Path);
+      char *Source_Code_Path_0 = Arguments[Argument_Index];
+      string Source_Code = Read_Entire_File(&Arena, Source_Code_Path_0);
+
+      string Source_Code_Path = From_C_String(Source_Code_Path_0);
+      string Output_File_Name = {0};
 
       // First pass to determine the number of lines to allocate. This will
       // include any non-empty line of source code.
@@ -176,6 +182,56 @@ int main(int Argument_Count, char **Arguments)
          source_code_line *Line = Lines + Line_Index;
          Line->Machine_Address = Machine_Address;
 
+         if(Line->Directive.Length)
+         {
+            if(Has_Prefix_Then_Remove(&Line->Directive, S("file")))
+            {
+               Output_File_Name = Trim_Left(Line->Directive);
+            }
+            else if(Has_Prefix_Then_Remove(&Line->Directive, S("location")))
+            {
+               parsed_u32 Parsed_Address = Parse_U32(Trim(Line->Directive));
+               if(Parsed_Address.Ok)
+               {
+                  Machine_Address = Parsed_Address.Value;
+               }
+               else
+               {
+                  Report_Error("Failed to parse #location value: \"%.*s\".", Line->Directive);
+               }
+            }
+            else if(Has_Prefix_Then_Remove(&Line->Directive, S("bytes")))
+            {
+               if(Line->Instruction.Length)
+               {
+                  Report_Error("Don't use the #bytes directive on the same line as an instruction.");
+               }
+               else
+               {
+                  machine_code Literal_Bytes = {0};
+
+                  cut Bytes = {0};
+                  Bytes.After = Line->Directive;
+
+                  while(Bytes.After.Length)
+                  {
+                     Bytes = Cut(Bytes.After, ' ');
+                     if(Bytes.Before.Length)
+                     {
+                        parsed_u32 Parsed_Byte = Parse_U32(Bytes.Before);
+                        if(Parsed_Byte.Ok)
+                        {
+                           Literal_Bytes.Bytes[Literal_Bytes.Length++] = Parsed_Byte.Value;
+                        }
+                     }
+                  }
+
+                  Line->Machine_Code = Literal_Bytes;
+                  Machine_Address += Line->Machine_Code.Length;
+               }
+            }
+         }
+
          if(Line->Label.Length)
          {
             label_address Label_Address = {0};
@@ -186,10 +242,10 @@ int main(int Argument_Count, char **Arguments)
 
          if(Line->Instruction.Length)
          {
-            Line->Machine_Instruction = Generate_Machine_Instruction(Line->Instruction);
+            Line->Machine_Code = Generate_Machine_Instruction(Line->Instruction);
             Line->Machine_Address = Machine_Address;
 
-            Machine_Address += Line->Machine_Instruction.Length;
+            Machine_Address += Line->Machine_Code.Length;
          }
       }
 
@@ -202,25 +258,26 @@ int main(int Argument_Count, char **Arguments)
       {
          source_code_line *Line = Lines + Line_Index;
 
-         if(Line->Machine_Instruction.Label_Operand.Length)
+         if(Line->Machine_Code.Label_Operand.Length)
          {
             // TODO: Smarter lookup.
             index Label_Address = 0xFF;
             for(int Label_Index = 0; Label_Index < Label_Address_Count; ++Label_Index)
             {
                label_address *A = Label_Addresses + Label_Index;
-               if(Equals(A->Label, Line->Machine_Instruction.Label_Operand))
+               if(Equals(A->Label, Line->Machine_Code.Label_Operand))
                {
                   Label_Address = A->Address;
                }
             }
 
-            Patch_Label_Address(&Line->Machine_Instruction, Line->Machine_Address, Label_Address);
+            Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, Label_Address);
          }
 
-         for(int Byte_Index = 0; Byte_Index < Line->Machine_Instruction.Length; ++Byte_Index)
+         Output_Machine_Address = Line->Machine_Address;
+         for(int Byte_Index = 0; Byte_Index < Line->Machine_Code.Length; ++Byte_Index)
          {
-            Output[Output_Machine_Address++] = Line->Machine_Instruction.Bytes[Byte_Index];
+            Output[Output_Machine_Address++] = Line->Machine_Code.Bytes[Byte_Index];
          }
       }
 
@@ -229,18 +286,23 @@ int main(int Argument_Count, char **Arguments)
       //    Print_Instruction(Lines + Line_Index);
       // }
 
-      cut File_Name = {0};
-      File_Name.After.Data = (u8 *)Source_Code_Path;
-      File_Name.After.Length = strlen(Source_Code_Path);
-      while(File_Name.After.Length)
+      if(Output_File_Name.Length == 0)
       {
-         File_Name = Cut(File_Name.After, '/');
+         cut File_Name = {0};
+         File_Name.After = Source_Code_Path;
+         while(File_Name.After.Length)
+         {
+            File_Name = Cut(File_Name.After, '/');
+         }
+         Has_Suffix_Then_Remove(&File_Name.Before, S(".asm"));
+         Output_File_Name = File_Name.Before;
       }
-      Has_Suffix_Then_Remove(&File_Name.Before, S(".asm"));
 
-      char Output_Path[256] = {0};
-      snprintf(Output_Path, sizeof(Output_Path), "%.*s.bin", (int)File_Name.Before.Length, File_Name.Before.Data);
-      Write_Entire_File(Output, Output_Machine_Address, Output_Path);
+      // TODO: Converting back and forth to null-terminated strings is silly,
+      // but the file read and write functions work more naturally with them
+      // when using the CRT. So maybe stop using CRT functions.
+      char *Output_File_Name_0 = To_C_String(&Arena, Output_File_Name);
+      Write_Entire_File(Output, Output_Machine_Address, Output_File_Name_0);
    }
 
    return(0);

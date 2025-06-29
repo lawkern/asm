@@ -64,6 +64,35 @@ static string Span(u8 *Begin, u8 *End)
    return(Result);
 }
 
+static index C_String_Length(char *C_String)
+{
+   index Result = 0;
+   while(*C_String)
+   {
+      C_String++;
+   }
+
+   return(Result);
+}
+
+static string From_C_String(char *C_String)
+{
+   u8 *Begin = (u8 *)C_String;
+   u8 *End   = (u8 *)C_String + C_String_Length(C_String);
+
+   string Result = Span(Begin, End);
+   return(Result);
+}
+
+static char *To_C_String(arena *Arena, string String)
+{
+   char *Result = Allocate(Arena, char, String.Length + 1);
+   memcpy(Result, String.Data, String.Length);
+   Result[String.Length] = 0;
+
+   return(Result);
+}
+
 static bool Equals(string A, string B)
 {
    bool Result = (A.Length == B.Length) && (!A.Length || !memcmp(A.Data, B.Data, A.Length));
