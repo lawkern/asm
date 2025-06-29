@@ -67,9 +67,9 @@ static string Span(u8 *Begin, u8 *End)
 static index C_String_Length(char *C_String)
 {
    index Result = 0;
-   while(*C_String)
+   while(*C_String++)
    {
-      C_String++;
+      Result++;
    }
 
    return(Result);
@@ -266,7 +266,7 @@ static string Read_Entire_File(arena *Arena, char *Path)
    }
    else
    {
-      Report_Error("Failed to open input file \"%s\".", Path);
+      Report_Error("Failed to open file \"%s\".", Path);
    }
 
    return(Result);
@@ -285,12 +285,12 @@ static bool Write_Entire_File(u8 *Memory, index Size, char *Path)
       }
       else
       {
-         Report_Error("Failed to write to output file \"%s\".", Path);
+         Report_Error("Failed to write to file \"%s\".", Path);
       }
    }
    else
    {
-      Report_Error("Failed to open output file \"%s\".", Path);
+      Report_Error("Failed to create file \"%s\".", Path);
    }
 
    return(Result);
