@@ -68,7 +68,7 @@ static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Opera
    if(Operands.Length && Operands.Data[0] >= '0' && Operands.Data[0] <= '9')
    {
       // Number literal
-      parsed_u32 Parsed_Number = Parse_U32(Operands);
+      parsed_integer Parsed_Number = Parse_Integer(Operands);
       if(Parsed_Number.Ok)
       {
          Result->Bytes[0] = (u8)Parsed_Number.Value;

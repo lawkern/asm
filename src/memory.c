@@ -203,9 +203,9 @@ static cut Cut(string String, u8 Separator)
 }
 
 typedef struct {
-   u32 Value;
+   s64 Value;
    bool Ok;
-} parsed_u32;
+} parsed_integer;
 
 static u8 Digit_Values[256] =
 {
@@ -216,10 +216,12 @@ static u8 Digit_Values[256] =
    ['a'] = 10, ['b'] = 11, ['c'] = 12, ['d'] = 13, ['e'] = 14, ['f'] = 15,
 };
 
-static parsed_u32 Parse_U32(string Number)
+static parsed_integer Parse_Integer(string Number)
 {
-   parsed_u32 Result = {0};
+   parsed_integer Result = {0};
    Result.Ok = true;
+
+   s64 Sign = (Has_Prefix_Then_Remove(&Number, S("-"))) ? -1 : 1;
 
    int Radix = 10;
    if     (Has_Prefix_Then_Remove(&Number, S("0b"))) Radix = 2;
@@ -227,18 +229,19 @@ static parsed_u32 Parse_U32(string Number)
    else if(Has_Prefix_Then_Remove(&Number, S("0d"))) Radix = 10;
    else if(Has_Prefix_Then_Remove(&Number, S("0x"))) Radix = 16;
 
+   u64 Value = 0;
    for(int Digit_Index = 0; Digit_Index < Number.Length; ++Digit_Index)
    {
       u8 Digit = Digit_Values[Number.Data[Digit_Index]];
       if(Digit > (Radix - 1))
       {
          Result.Ok = false;
-         Result.Value = 0;
          break;
       }
 
-      Result.Value = (Result.Value * Radix) + Digit;
+      Value = (Value * Radix) + Digit;
    }
+   Result.Value = Sign * Value;
 
    return(Result);
 }

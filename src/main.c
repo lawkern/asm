@@ -58,6 +58,42 @@ typedef struct {
    machine_code Machine_Code;
 } source_code_line;
 
+static void Encode_Literal_Bytes(source_code_line *Line, int Bytes_Per_Literal)
+{
+   machine_code Result = {0};
+
+   if(Line->Instruction.Length)
+   {
+      Report_Error("Don't use the #bytes directive on the same line as an instruction.");
+   }
+   else
+   {
+      cut Literals = {0};
+      Literals.After = Line->Directive;
+
+      while(Literals.After.Length)
+      {
+         Literals = Cut(Literals.After, ' ');
+         if(Literals.Before.Length)
+         {
+            parsed_integer Parsed_Literal = Parse_Integer(Literals.Before);
+            if(Parsed_Literal.Ok)
+            {
+               s64 Value = (s64)Parsed_Literal.Value;
+
+               // TODO: Handle endianess.
+               for(int Byte_Index = 0; Byte_Index < Bytes_Per_Literal; ++Byte_Index)
+               {
+                  Result.Bytes[Result.Length++] = (u8)(Value >> (Byte_Index * 8));
+               }
+            }
+         }
+      }
+   }
+
+   Line->Machine_Code = Result;
+}
+
 static void Print_Instruction(source_code_line *Line)
 {
    printf("%.*s:%-4d | ",
@@ -190,7 +226,7 @@ int main(int Argument_Count, char **Arguments)
             }
             else if(Has_Prefix_Then_Remove(&Line->Directive, S("location")))
             {
-               parsed_u32 Parsed_Address = Parse_U32(Trim(Line->Directive));
+               parsed_integer Parsed_Address = Parse_Integer(Trim(Line->Directive));
                if(Parsed_Address.Ok)
                {
                   Machine_Address = Parsed_Address.Value;
@@ -202,33 +238,19 @@ int main(int Argument_Count, char **Arguments)
             }
             else if(Has_Prefix_Then_Remove(&Line->Directive, S("bytes")))
             {
-               if(Line->Instruction.Length)
-               {
-                  Report_Error("Don't use the #bytes directive on the same line as an instruction.");
-               }
-               else
-               {
-                  machine_code Literal_Bytes = {0};
-
-                  cut Bytes = {0};
-                  Bytes.After = Line->Directive;
-
-                  while(Bytes.After.Length)
-                  {
-                     Bytes = Cut(Bytes.After, ' ');
-                     if(Bytes.Before.Length)
-                     {
-                        parsed_u32 Parsed_Byte = Parse_U32(Bytes.Before);
-                        if(Parsed_Byte.Ok)
-                        {
-                           Literal_Bytes.Bytes[Literal_Bytes.Length++] = Parsed_Byte.Value;
-                        }
-                     }
-                  }
-
-                  Line->Machine_Code = Literal_Bytes;
-                  Machine_Address += Line->Machine_Code.Length;
-               }
+               Encode_Literal_Bytes(Line, 1);
+            }
+            else if(Has_Prefix_Then_Remove(&Line->Directive, S("2bytes")))
+            {
+               Encode_Literal_Bytes(Line, 2);
+            }
+            else if(Has_Prefix_Then_Remove(&Line->Directive, S("4bytes")))
+            {
+               Encode_Literal_Bytes(Line, 4);
+            }
+            else if(Has_Prefix_Then_Remove(&Line->Directive, S("8bytes")))
+            {
+               Encode_Literal_Bytes(Line, 8);
             }
          }
 
@@ -244,9 +266,9 @@ int main(int Argument_Count, char **Arguments)
          {
             Line->Machine_Code = Generate_Machine_Instruction(Line->Instruction);
             Line->Machine_Address = Machine_Address;
-
-            Machine_Address += Line->Machine_Code.Length;
          }
+
+         Machine_Address += Line->Machine_Code.Length;
       }
 
       u8 *Output = Allocate(&Arena, u8, Machine_Address);
@@ -282,7 +304,7 @@ int main(int Argument_Count, char **Arguments)
       }
 
       // for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
-      // {
+     // {
       //    Print_Instruction(Lines + Line_Index);
       // }
 
