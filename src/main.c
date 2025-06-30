@@ -21,12 +21,40 @@ static void Report_Error(char *Message, ...)
 #include "memory.c"
 
 typedef struct {
-   string Label;
-   index Address;
-} label_address;
+   string Name;
+   index Value;
+} constant_value;
 
-static int Label_Address_Count;
-static label_address Label_Addresses[512];
+typedef struct {
+   int Constant_Count;
+   constant_value Constants[512];
+} assembler_context;
+
+static assembler_context Context;
+
+typedef struct {
+   constant_value Constant;
+   bool Found;
+} constant_search_result;
+
+static constant_search_result Find_Constant(assembler_context *Context, string Name)
+{
+   constant_search_result Result = {0};
+
+   // TODO: Smarter lookup.
+   for(int Const_Index = 0; Const_Index < Context->Constant_Count; ++Const_Index)
+   {
+      constant_value Constant = Context->Constants[Const_Index];
+      if(Equals(Constant.Name, Name))
+      {
+         Result.Found = true;
+         Result.Constant = Constant;
+         break;
+      }
+   }
+
+   return(Result);
+}
 
 typedef struct {
    int Length;
@@ -219,11 +247,11 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
 
       if(Line->Directive.Length)
       {
-         if(Has_Prefix_Then_Remove(&Line->Directive, S("file")))
+         if(Has_Prefix_Then_Remove(&Line->Directive, S("file ")))
          {
             Result.File_Name = Trim_Left(Line->Directive);
          }
-         else if(Has_Prefix_Then_Remove(&Line->Directive, S("location")))
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("location ")))
          {
             parsed_integer Parsed_Address = Parse_Integer(Trim(Line->Directive));
             if(Parsed_Address.Ok)
@@ -235,30 +263,49 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
                Report_Error("Failed to parse #location value: \"%.*s\".", Line->Directive);
             }
          }
-         else if(Has_Prefix_Then_Remove(&Line->Directive, S("bytes")))
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("bytes ")))
          {
             Encode_Literal_Bytes(Line, 1);
          }
-         else if(Has_Prefix_Then_Remove(&Line->Directive, S("2bytes")))
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("2bytes ")))
          {
             Encode_Literal_Bytes(Line, 2);
          }
-         else if(Has_Prefix_Then_Remove(&Line->Directive, S("4bytes")))
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("4bytes ")))
          {
             Encode_Literal_Bytes(Line, 4);
          }
-         else if(Has_Prefix_Then_Remove(&Line->Directive, S("8bytes")))
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("8bytes ")))
          {
             Encode_Literal_Bytes(Line, 8);
+         }
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("constant ")))
+         {
+            cut Constant_Parts = Cut(Trim_Left(Line->Directive), ' ');
+            if(Constant_Parts.Before.Length && Constant_Parts.After.Length)
+            {
+               parsed_integer Parsed_Value = Parse_Integer(Constant_Parts.After);
+               if(Parsed_Value.Ok)
+               {
+                  constant_value Constant = {0};
+                  Constant.Name = Constant_Parts.Before;
+                  Constant.Value = Parsed_Value.Value;
+                  Context.Constants[Context.Constant_Count++] = Constant;
+               }
+               else
+               {
+                  Report_Error("Invalid integer value: %.*s", (int)Constant_Parts.After.Length, Constant_Parts.After.Data);
+               }
+            }
          }
       }
 
       if(Line->Label.Length)
       {
-         label_address Label_Address = {0};
-         Label_Address.Label = Line->Label;
-         Label_Address.Address = Line->Machine_Address;
-         Label_Addresses[Label_Address_Count++] = Label_Address;
+         constant_value Label_Address = {0};
+         Label_Address.Name = Line->Label;
+         Label_Address.Value = Line->Machine_Address;
+         Context.Constants[Context.Constant_Count++] = Label_Address;
       }
 
       if(Line->Instruction.Length)
@@ -283,18 +330,15 @@ static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Cou
 
       if(Line->Machine_Code.Label_Operand.Length)
       {
-         // TODO: Smarter lookup.
-         index Label_Address = 0xFF;
-         for(int Label_Index = 0; Label_Index < Label_Address_Count; ++Label_Index)
+         constant_search_result Label_Address = Find_Constant(&Context, Line->Machine_Code.Label_Operand);
+         if(Label_Address.Found)
          {
-            label_address *A = Label_Addresses + Label_Index;
-            if(Equals(A->Label, Line->Machine_Code.Label_Operand))
-            {
-               Label_Address = A->Address;
-            }
+            Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, Label_Address.Constant.Value);
          }
-
-         Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, Label_Address);
+         else
+         {
+            Report_Error("Failed to recognized \"%.*s\"", (int)Label_Address.Constant.Name.Length, Label_Address.Constant.Name.Data);
+         }
       }
 
       Output_Machine_Address = Line->Machine_Address;
@@ -336,11 +380,6 @@ int main(int Argument_Count, char **Arguments)
          // addresses into any instructions that reference labels.
          u8 *Output = Allocate(&Arena, u8, Parse_Result.Size);
          Write_Machine_Code(Output, Lines, Line_Count);
-
-         // for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
-         // {
-         //    Print_Instruction(Lines + Line_Index);
-         // }
 
          string Output_File_Name = {0};
          if(Parse_Result.File_Name.Length)

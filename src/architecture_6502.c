@@ -61,7 +61,7 @@ typedef struct {
    bool Ok;
 } instruction_data;
 
-static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Operands, bool Is_Branch)
+static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Operands, bool Is_Branch, bool Is_Jump)
 {
    bool Ok = false;
 
@@ -71,23 +71,35 @@ static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Opera
       parsed_integer Parsed_Number = Parse_Integer(Operands);
       if(Parsed_Number.Ok)
       {
+         // TODO: Negative values?
+         Result->Length = (Is_Jump || Parsed_Number.Value > 0xFF) ? 2 : 1;
          Result->Bytes[0] = (u8)Parsed_Number.Value;
          Result->Bytes[1] = (u8)(Parsed_Number.Value >> 8);
-         Result->Length = Result->Bytes[1] ? 2 : 1;
          Ok = true;
       }
    }
    else
    {
-      // Label (to be populated later)
-      Result->Bytes[0] = 0xBE;
-      Result->Bytes[1] = 0xEF;
-      Result->Label_Operand = Operands;
-      Result->Length = (Is_Branch) ? 1 : 2;
+      constant_search_result Constant = Find_Constant(&Context, Operands);
+      if(Constant.Found)
+      {
+         // TODO: Negative values?
+         Result->Length = (Is_Jump || Constant.Constant.Value > 0xFF) ? 2 : 1;
+         Result->Bytes[0] = (u8)Constant.Constant.Value;
+         Result->Bytes[1] = (u8)(Constant.Constant.Value >> 8);
+      }
+      else
+      {
+         // Label (to be populated later)
+         Result->Length = (Is_Branch) ? 1 : 2;
+         Result->Bytes[0] = 0xBE;
+         Result->Bytes[1] = 0xEF;
+         Result->Label_Operand = Operands;
+      }
    }
 
    return(Ok);
- }
+}
 
 static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_Jump)
 {
@@ -110,29 +122,29 @@ static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_
       if(Has_Suffix_Then_Remove(&Operands, S(" + x]]")))
       {
          Result.Addressing_Mode = ADDRMODE_INDIRECTX;
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
       }
       else if(Has_Suffix_Then_Remove(&Operands, S("] + y]")))
       {
          Result.Addressing_Mode = ADDRMODE_INDIRECTY;
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
       }
    }
    else if(Has_Prefix_Then_Remove(&Operands, S("[")))
    {
       if(Has_Suffix_Then_Remove(&Operands, S(" + x]")))
       {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
          Result.Addressing_Mode = (Result.Length == 2) ? ADDRMODE_ABSOLUTEX : ADDRMODE_ZEROPAGEX;
       }
       else if(Has_Suffix_Then_Remove(&Operands, S(" + y]")))
       {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
          Result.Addressing_Mode = (Result.Length == 2) ? ADDRMODE_ABSOLUTEY : ADDRMODE_ZEROPAGEY;
       }
       else if(Has_Suffix_Then_Remove(&Operands, S("]")))
       {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
          Result.Addressing_Mode = (Result.Length == 2)
             ? (Is_Jump) ? ADDRMODE_INDIRECT : ADDRMODE_ABSOLUTE
             : ADDRMODE_ZEROPAGE;
@@ -140,14 +152,14 @@ static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_
    }
    else if(Operands.Data[0] >= '0' && Operands.Data[0] <= '9')
    {
-      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
       Result.Addressing_Mode = (Result.Length == 2)
          ? ADDRMODE_ABSOLUTE
          : (Is_Branch) ? ADDRMODE_RELATIVE : ADDRMODE_IMMEDIATE;
    }
    else // Label
    {
-      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch);
+      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
       Result.Addressing_Mode = (Is_Branch) ? ADDRMODE_RELATIVE : ADDRMODE_ABSOLUTE;
    }
 
@@ -272,6 +284,7 @@ static machine_code Encode(opcode_pattern Opcode, string Operands, instruction_g
 static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
 {
    machine_code Result = {0};
+   (void)Context;
 
    // TODO: Collapse all this down into a hash table or something.
    // TODO: Support other whitespace characters.

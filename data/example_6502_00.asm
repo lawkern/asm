@@ -10,9 +10,9 @@
 \\ NES header bytes.
 #bytes 0x4e 0x45 0x53 0x1a
 
-#2bytes 0x1122 0x3344 0x5566 0x7788 0x00
-#4bytes 0x11223344 0x55667788 0x00
-#8bytes 0x1122334455667788 0x00
+\ #2bytes 0x1122 0x3344 0x5566 0x7788 0x00
+\ #4bytes 0x11223344 0x55667788 0x00
+\ #8bytes 0x1122334455667788 0x00
 
 #section text
 #location 0x0100
@@ -22,8 +22,8 @@ main: #api
     \ the default for non-prefixed integers). Memory references use brackets.
 
     lda 0x01                    \ Load immediate value into a
-Test1:  lda [0x01]              \ Load byte at zero page address into a
-Test2:  lda [0x01 + x]          \ Load byte at zero page address + x-offset into a
+Test1: lda [0x01]              \ Load byte at zero page address into a
+Test2: lda [0x01 + x]          \ Load byte at zero page address + x-offset into a
     lda [0x0123]                \ Load byte at absolute address into a
     lda [0x0123 + x]            \ Load byte at absolute address + x-offset into a
     lda [0x0123 + y]            \ Load byte at absolute address + y-offset into a
@@ -31,13 +31,17 @@ Test2:  lda [0x01 + x]          \ Load byte at zero page address + x-offset into
     lda [[0x01] + y]            \ Load byte at indirect indexed into a
 
 Test3:
-    sta [0x01]                  \ Store a at zero page address
-    sta [0x01 + x]              \ Store a at zero page address + x-offset
-    sta [0x0123]                \ Store a at absolute address
-    sta [0x0123 + x]            \ Store a at absolute address + x-offset
-    sta [0x0123 + y]            \ Store a at absolute address + y-offset
-    sta [[0x01 + x]]            \ Store a at indexed indirect address
-    sta [[0x01] + y]            \ Store a indirect indexed address
+
+#constant Zero_Address 0x01
+#constant Base_Address 0x0123
+
+    sta [Zero_Address]          \ Store a at zero page address
+    sta [Zero_Address + x]      \ Store a at zero page address + x-offset
+    sta [Base_Address]          \ Store a at absolute address
+    sta [Base_Address + x]      \ Store a at absolute address + x-offset
+    sta [Base_Address + y]      \ Store a at absolute address + y-offset
+    sta [[Zero_Address + x]]    \ Store a at indexed indirect address
+    sta [[Zero_Address] + y]    \ Store a indirect indexed address
 
     ora 0x01                    \ Bitwise-Or immediate value into a
     ora [0x01]                  \ Bitwise-Or byte at zero page address into a
