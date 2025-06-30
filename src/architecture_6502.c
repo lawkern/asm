@@ -80,13 +80,13 @@ static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Opera
    }
    else
    {
-      constant_search_result Constant = Find_Constant(&Context, Operands);
-      if(Constant.Found)
+      u64 *Constant = Lookup(0, &Context.Constants, Operands);
+      if(Constant)
       {
          // TODO: Negative values?
-         Result->Length = (Is_Jump || Constant.Constant.Value > 0xFF) ? 2 : 1;
-         Result->Bytes[0] = (u8)Constant.Constant.Value;
-         Result->Bytes[1] = (u8)(Constant.Constant.Value >> 8);
+         Result->Length = (Is_Jump || (*Constant) > 0xFF) ? 2 : 1;
+         Result->Bytes[0] = (u8)(*Constant);
+         Result->Bytes[1] = (u8)((*Constant) >> 8);
       }
       else
       {

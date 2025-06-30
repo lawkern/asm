@@ -246,6 +246,51 @@ static parsed_integer Parse_Integer(string Number)
    return(Result);
 }
 
+typedef struct map map;
+struct map
+{
+   map *Children[4];
+   string Key;
+   u64 Value;
+};
+
+static u64 Hash64(string String)
+{
+   u64 Result = 0x100;
+   for(index Index = 0; Index < String.Length; ++Index)
+   {
+      Result ^= String.Data[Index] & 0xFF;
+      Result *= 1111111111111111111;
+   }
+
+   return(Result);
+}
+
+static u64 *Lookup(arena *Arena, map **Map, string Key)
+{
+   u64 *Result = 0;
+
+   for(u64 Hash = Hash64(Key); *Map; Hash <<= 2)
+   {
+      if(Equals(Key, (*Map)->Key))
+      {
+         Result = &(*Map)->Value;
+         break;
+      }
+      Map = &(*Map)->Children[Hash >> 62];
+   }
+
+   if(!Result && Arena)
+   {
+      // NOTE: Providing an arena causes the insertion of a non-existent entry.
+      *Map = Allocate(Arena, map, 1);
+      (*Map)->Key = Key;
+      Result = &(*Map)->Value;
+   }
+
+   return(Result);
+}
+
 static string Read_Entire_File(arena *Arena, char *Path)
 {
    string Result = {0};

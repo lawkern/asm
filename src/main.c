@@ -21,40 +21,11 @@ static void Report_Error(char *Message, ...)
 #include "memory.c"
 
 typedef struct {
-   string Name;
-   index Value;
-} constant_value;
-
-typedef struct {
-   int Constant_Count;
-   constant_value Constants[512];
+   arena Arena;
+   map *Constants;
 } assembler_context;
 
 static assembler_context Context;
-
-typedef struct {
-   constant_value Constant;
-   bool Found;
-} constant_search_result;
-
-static constant_search_result Find_Constant(assembler_context *Context, string Name)
-{
-   constant_search_result Result = {0};
-
-   // TODO: Smarter lookup.
-   for(int Const_Index = 0; Const_Index < Context->Constant_Count; ++Const_Index)
-   {
-      constant_value Constant = Context->Constants[Const_Index];
-      if(Equals(Constant.Name, Name))
-      {
-         Result.Found = true;
-         Result.Constant = Constant;
-         break;
-      }
-   }
-
-   return(Result);
-}
 
 typedef struct {
    int Length;
@@ -282,19 +253,18 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("constant ")))
          {
             cut Constant_Parts = Cut(Trim_Left(Line->Directive), ' ');
-            if(Constant_Parts.Before.Length && Constant_Parts.After.Length)
+            string Name = Constant_Parts.Before;
+            string Value = Constant_Parts.After;
+            if(Name.Length && Value.Length)
             {
-               parsed_integer Parsed_Value = Parse_Integer(Constant_Parts.After);
+               parsed_integer Parsed_Value = Parse_Integer(Value);
                if(Parsed_Value.Ok)
                {
-                  constant_value Constant = {0};
-                  Constant.Name = Constant_Parts.Before;
-                  Constant.Value = Parsed_Value.Value;
-                  Context.Constants[Context.Constant_Count++] = Constant;
+                  *Lookup(&Context.Arena, &Context.Constants, Name) = Parsed_Value.Value;
                }
                else
                {
-                  Report_Error("Invalid integer value: %.*s", (int)Constant_Parts.After.Length, Constant_Parts.After.Data);
+                  Report_Error("Invalid integer value: %.*s", (int)Value.Length, Value.Data);
                }
             }
          }
@@ -302,10 +272,7 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
 
       if(Line->Label.Length)
       {
-         constant_value Label_Address = {0};
-         Label_Address.Name = Line->Label;
-         Label_Address.Value = Line->Machine_Address;
-         Context.Constants[Context.Constant_Count++] = Label_Address;
+         *Lookup(&Context.Arena, &Context.Constants, Line->Label) = Line->Machine_Address;
       }
 
       if(Line->Instruction.Length)
@@ -327,17 +294,18 @@ static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Cou
    for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
    {
       source_code_line *Line = Lines + Line_Index;
+      string Label = Line->Machine_Code.Label_Operand;
 
-      if(Line->Machine_Code.Label_Operand.Length)
+      if(Label.Length)
       {
-         constant_search_result Label_Address = Find_Constant(&Context, Line->Machine_Code.Label_Operand);
-         if(Label_Address.Found)
+         u64 *Label_Address = Lookup(&Context.Arena, &Context.Constants, Label);
+         if(Label_Address)
          {
-            Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, Label_Address.Constant.Value);
+            Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, *Label_Address);
          }
          else
          {
-            Report_Error("Failed to recognized \"%.*s\"", (int)Label_Address.Constant.Name.Length, Label_Address.Constant.Name.Data);
+            Report_Error("Failed to recognized \"%.*s\"", (int)Label.Length, Label.Data);
          }
       }
 
@@ -351,15 +319,15 @@ static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Cou
 
 int main(int Argument_Count, char **Arguments)
 {
-   arena Arena = {0};
-   Arena.Size = 1024 * 1024 * 1024;
-   Arena.Base = malloc(Arena.Size);
+   arena *Arena = &Context.Arena;
+   Arena->Size = 1024 * 1024 * 1024;
+   Arena->Base = malloc(Arena->Size);
 
    // NOTE: For now, assume that all provided arguments are input files.
    for(int Argument_Index = 1; Argument_Index < Argument_Count; ++Argument_Index)
    {
       char *Source_Code_Path_0 = Arguments[Argument_Index];
-      string Source_Code = Read_Entire_File(&Arena, Source_Code_Path_0);
+      string Source_Code = Read_Entire_File(Arena, Source_Code_Path_0);
       if(Source_Code.Length)
       {
          // First pass to determine the number of lines to allocate. This will
@@ -369,7 +337,7 @@ int main(int Argument_Count, char **Arguments)
 
          // Second pass to identify directives, labels and instructions for each
          // allocated line of assembly code.
-         source_code_line *Lines = Allocate(&Arena, source_code_line, Line_Count);
+         source_code_line *Lines = Allocate(Arena, source_code_line, Line_Count);
          Tokenize_Source_Lines(Lines, Source_Code, Source_Code_Path);
 
          // Third pass to generate machine code based on identified assembly
@@ -378,7 +346,7 @@ int main(int Argument_Count, char **Arguments)
 
          // Fourth pass to populate output buffer with machine code and patch
          // addresses into any instructions that reference labels.
-         u8 *Output = Allocate(&Arena, u8, Parse_Result.Size);
+         u8 *Output = Allocate(Arena, u8, Parse_Result.Size);
          Write_Machine_Code(Output, Lines, Line_Count);
 
          string Output_File_Name = {0};
@@ -402,7 +370,7 @@ int main(int Argument_Count, char **Arguments)
          // TODO: Converting back and forth to null-terminated strings is silly,
          // but the file read and write functions work more naturally with them
          // when using the CRT. So maybe stop using CRT functions.
-         Write_Entire_File(Output, Parse_Result.Size, To_C_String(&Arena, Output_File_Name));
+         Write_Entire_File(Output, Parse_Result.Size, To_C_String(Arena, Output_File_Name));
       }
    }
 
