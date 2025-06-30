@@ -29,7 +29,11 @@ static assembler_context Context;
 
 typedef struct {
    int Length;
-   u8 Bytes[16];
+   union
+   {
+      u8 Bytes[16];
+      u8 *Bytes_Pointer;
+   };
 
    string Label_Operand;
 } machine_code;
@@ -65,13 +69,32 @@ static void Encode_Literal_Bytes(source_code_line *Line, int Bytes_Per_Literal)
 
    if(Line->Instruction.Length)
    {
-      Report_Error("Don't use the #bytes directive on the same line as an instruction.");
+      Report_Error("Don't use an embedding directive on the same line as an instruction.");
    }
    else
    {
+      index Literal_Count = 0;
       cut Literals = {0};
-      Literals.After = Line->Directive;
 
+      // Count literals.
+      Literals.After = Line->Directive;
+      while(Literals.After.Length)
+      {
+         Literals = Cut(Literals.After, ' ');
+         Literal_Count++;
+      }
+
+      u8 *Destination = Result.Bytes;
+      Result.Length = Literal_Count * Bytes_Per_Literal;
+      if(Result.Length > Array_Count(Result.Bytes))
+      {
+         Destination = Allocate(&Context.Arena, u8, Result.Length);
+         Result.Bytes_Pointer = Destination;
+      }
+
+      // Populate Literals.
+      index Byte_Count = 0;
+      Literals.After = Line->Directive;
       while(Literals.After.Length)
       {
          Literals = Cut(Literals.After, ' ');
@@ -85,10 +108,60 @@ static void Encode_Literal_Bytes(source_code_line *Line, int Bytes_Per_Literal)
                // TODO: Handle endianess.
                for(int Byte_Index = 0; Byte_Index < Bytes_Per_Literal; ++Byte_Index)
                {
-                  Result.Bytes[Result.Length++] = (u8)(Value >> (Byte_Index * 8));
+                  Destination[Byte_Count++] = (u8)(Value >> (Byte_Index * 8));
                }
             }
+            else
+            {
+               Report_Error("Could not parse \"%.*s\" as an integer literal.", (int)Literals.Before.Length, Literals.Before.Data);
+            }
          }
+      }
+   }
+
+   Line->Machine_Code = Result;
+}
+
+typedef enum {
+   STRINGKIND_STRING,
+   STRINGKIND_CSTRING,
+} string_kind;
+
+static void Encode_Literal_String(source_code_line *Line, string_kind Kind)
+{
+   machine_code Result = {0};
+
+   if(Line->Instruction.Length)
+   {
+      Report_Error("Don't use an embedding directive on the same line as an instruction.");
+   }
+   else
+   {
+      if(Has_Prefix_Then_Remove(&Line->Directive, S("\"")) &&
+         Has_Suffix_Then_Remove(&Line->Directive, S("\"")))
+      {
+         bool Null_Terminate = (Kind == STRINGKIND_CSTRING);
+         Result.Length = Line->Directive.Length + Null_Terminate;
+
+         u8 *Destination = Result.Bytes;
+         if(Result.Length > Array_Count(Result.Bytes))
+         {
+            Destination = Allocate(&Context.Arena, u8, Result.Length);
+            Result.Bytes_Pointer = Destination;
+         }
+
+         for(int Byte_Index = 0; Byte_Index < (Result.Length - Null_Terminate); ++Byte_Index)
+         {
+            Destination[Byte_Index] = Line->Directive.Data[Byte_Index];
+         }
+         if(Null_Terminate)
+         {
+            Destination[Result.Length] = 0;
+         }
+      }
+      else
+      {
+         Report_Error("Use double quotes for string literals.");
       }
    }
 
@@ -250,6 +323,14 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
          {
             Encode_Literal_Bytes(Line, 8);
          }
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("string ")))
+         {
+            Encode_Literal_String(Line, STRINGKIND_STRING);
+         }
+         else if(Has_Prefix_Then_Remove(&Line->Directive, S("cstring ")))
+         {
+            Encode_Literal_String(Line, STRINGKIND_CSTRING);
+         }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("constant ")))
          {
             cut Constant_Parts = Cut(Trim_Left(Line->Directive), ' ');
@@ -310,9 +391,13 @@ static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Cou
       }
 
       Output_Machine_Address = Line->Machine_Address;
+      u8 *Source = (Line->Machine_Code.Length > Array_Count(Line->Machine_Code.Bytes))
+         ? Line->Machine_Code.Bytes_Pointer
+         : Line->Machine_Code.Bytes;
+
       for(int Byte_Index = 0; Byte_Index < Line->Machine_Code.Length; ++Byte_Index)
       {
-         Result[Output_Machine_Address++] = Line->Machine_Code.Bytes[Byte_Index];
+         Result[Output_Machine_Address++] = Source[Byte_Index];
       }
    }
 }

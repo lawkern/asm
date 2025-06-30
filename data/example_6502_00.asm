@@ -10,10 +10,6 @@
 \\ NES header bytes.
 #bytes 0x4e 0x45 0x53 0x1a
 
-\ #2bytes 0x1122 0x3344 0x5566 0x7788 0x00
-\ #4bytes 0x11223344 0x55667788 0x00
-\ #8bytes 0x1122334455667788 0x00
-
 #section text
 #location 0x0100
 
@@ -22,8 +18,8 @@ main: #api
     \ the default for non-prefixed integers). Memory references use brackets.
 
     lda 0x01                    \ Load immediate value into a
-Test1: lda [0x01]              \ Load byte at zero page address into a
-Test2: lda [0x01 + x]          \ Load byte at zero page address + x-offset into a
+Test1: lda [0x01]               \ Load byte at zero page address into a
+Test2: lda [0x01 + x]           \ Load byte at zero page address + x-offset into a
     lda [0x0123]                \ Load byte at absolute address into a
     lda [0x0123 + x]            \ Load byte at absolute address + x-offset into a
     lda [0x0123 + y]            \ Load byte at absolute address + y-offset into a
@@ -212,4 +208,10 @@ Jmp_Address:
 
 #section data
 #location 0x2000
-#bytes 0x03 0x02 0x01 0x00
+
+Variable_0: #bytes 0x03 0x02 0x01 0x00
+Variable_1: #2bytes 0x1122 0x3344 0x5566 0x7788 0x00
+Variable_2: #4bytes 0x11223344 0x55667788 0x00
+Variable_3: #8bytes 0x1122334455667788 0x1122334455667788 0x1122334455667788 0x1122334455667788 0x00
+Variable_4: #string "Hello"
+Variable_5: #cstring "HelloZ                                                "

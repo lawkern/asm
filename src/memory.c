@@ -24,7 +24,7 @@ typedef struct {
    index Used;
 } arena;
 
-#define Array_Count(Array) (sizeof(Array) / sizeof((Array)[0]))
+#define Array_Count(Array) (index)(sizeof(Array) / sizeof((Array)[0]))
 
 #define Allocate(Arena, type, Count)                        \
    (type *)Allocate_Size((Arena), sizeof(type) * (Count))
