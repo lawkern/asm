@@ -408,8 +408,7 @@ static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
 #undef X
    }
 
-   // TODO: Support other whitespace characters.
-   cut Instruction_Operands = Cut(Instruction, ' ');
+   cut Instruction_Operands = Cut_Whitespace(Instruction);
    string Mnemonic = Instruction_Operands.Before;
    string Operands = Trim_Left(Instruction_Operands.After);
 

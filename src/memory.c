@@ -202,6 +202,29 @@ static cut Cut(string String, u8 Separator)
    return(Result);
 }
 
+static cut Cut_Whitespace(string String)
+{
+   cut Result = {0};
+
+   if(String.Length > 0)
+   {
+      u8 *Begin = String.Data;
+      u8 *End = Begin + String.Length;
+
+      u8 *Cut_Position = Begin;
+      while(Cut_Position < End && *Cut_Position > ' ')
+      {
+         Cut_Position++;
+      }
+
+      Result.Found = (Cut_Position < End);
+      Result.Before = Span(Begin, Cut_Position);
+      Result.After = Span(Cut_Position + Result.Found, End);
+   }
+
+   return(Result);
+}
+
 typedef struct {
    s64 Value;
    bool Ok;

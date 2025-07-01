@@ -97,7 +97,7 @@ static void Encode_Literal_Bytes(source_code_line *Line, int Bytes_Per_Literal)
       Literals.After = Line->Directive;
       while(Literals.After.Length)
       {
-         Literals = Cut(Literals.After, ' ');
+         Literals = Cut_Whitespace(Literals.After);
          if(Literals.Before.Length)
          {
             parsed_integer Parsed_Literal = Parse_Integer(Literals.Before);
@@ -333,7 +333,7 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("constant ")))
          {
-            cut Constant_Parts = Cut(Trim_Left(Line->Directive), ' ');
+            cut Constant_Parts = Cut_Whitespace(Trim_Left(Line->Directive));
             string Name = Constant_Parts.Before;
             string Value = Constant_Parts.After;
             if(Name.Length && Value.Length)
