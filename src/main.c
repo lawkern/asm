@@ -341,7 +341,7 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
                parsed_integer Parsed_Value = Parse_Integer(Value);
                if(Parsed_Value.Ok)
                {
-                  *Lookup(&Context.Arena, &Context.Constants, Name) = Parsed_Value.Value;
+                  Insert(&Context.Arena, &Context.Constants, Name, Parsed_Value.Value);
                }
                else
                {
@@ -353,7 +353,7 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
 
       if(Line->Label.Length)
       {
-         *Lookup(&Context.Arena, &Context.Constants, Line->Label) = Line->Machine_Address;
+         Insert(&Context.Arena, &Context.Constants, Line->Label, Line->Machine_Address);
       }
 
       if(Line->Instruction.Length)
@@ -379,14 +379,14 @@ static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Cou
 
       if(Label.Length)
       {
-         u64 *Label_Address = Lookup(&Context.Arena, &Context.Constants, Label);
-         if(Label_Address)
+         lookup_result Label_Address = Lookup(Context.Constants, Label);
+         if(Label_Address.Found)
          {
-            Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, *Label_Address);
+            Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, Label_Address.Value);
          }
          else
          {
-            Report_Error("Failed to recognized \"%.*s\"", (int)Label.Length, Label.Data);
+            Report_Error("Reference to missing label \"%.*s\".", (int)Label.Length, Label.Data);
          }
       }
 

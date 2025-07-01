@@ -266,29 +266,49 @@ static u64 Hash64(string String)
    return(Result);
 }
 
-static u64 *Lookup(arena *Arena, map **Map, string Key)
-{
-   u64 *Result = 0;
+typedef struct {
+   u64 Value;
+   bool Found;
+} lookup_result;
 
+static lookup_result Lookup(map *Map, string Key)
+{
+   lookup_result Result = {0};
+
+   for(u64 Hash = Hash64(Key); Map; Hash <<= 2)
+   {
+      if(Equals(Key, Map->Key))
+      {
+         Result.Value = Map->Value;
+         Result.Found = true;
+         break;
+      }
+      Map = Map->Children[Hash >> 62];
+   }
+
+   return(Result);
+}
+
+static void Insert(arena *Arena, map **Map, string Key, u64 Value)
+{
+   bool Found = false;
    for(u64 Hash = Hash64(Key); *Map; Hash <<= 2)
    {
       if(Equals(Key, (*Map)->Key))
       {
-         Result = &(*Map)->Value;
+         (*Map)->Value = Value;
+         Found = true;
          break;
       }
       Map = &(*Map)->Children[Hash >> 62];
    }
 
-   if(!Result && Arena)
+   if(!Found)
    {
-      // NOTE: Providing an arena causes the insertion of a non-existent entry.
       *Map = Allocate(Arena, map, 1);
       (*Map)->Key = Key;
-      Result = &(*Map)->Value;
+      (*Map)->Value = Value;
    }
-
-   return(Result);
 }
 
 static string Read_Entire_File(arena *Arena, char *Path)

@@ -59,9 +59,9 @@ typedef struct {
    u8 Bytes[2];
 
    bool Ok;
-} instruction_data;
+} parsed_instruction_data;
 
-static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Operands, bool Is_Branch, bool Is_Jump)
+static bool Parse_And_Populate_Data_Bytes(parsed_instruction_data *Result, string Operands, bool Is_Branch, bool Is_Jump)
 {
    bool Ok = false;
 
@@ -80,13 +80,13 @@ static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Opera
    }
    else
    {
-      u64 *Constant = Lookup(0, &Context.Constants, Operands);
-      if(Constant)
+      lookup_result Constant = Lookup(Context.Constants, Operands);
+      if(Constant.Found)
       {
          // TODO: Negative values?
-         Result->Length = (Is_Jump || (*Constant) > 0xFF) ? 2 : 1;
-         Result->Bytes[0] = (u8)(*Constant);
-         Result->Bytes[1] = (u8)((*Constant) >> 8);
+         Result->Length = (Is_Jump || Constant.Value > 0xFF) ? 2 : 1;
+         Result->Bytes[0] = (u8)Constant.Value;
+         Result->Bytes[1] = (u8)(Constant.Value >> 8);
       }
       else
       {
@@ -101,11 +101,11 @@ static bool Parse_And_Populate_Data_Bytes(instruction_data *Result, string Opera
    return(Ok);
 }
 
-static instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_Jump)
+static parsed_instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_Jump)
 {
    // TODO: Enforce syntax requirements.
 
-   instruction_data Result = {0};
+   parsed_instruction_data Result = {0};
 
    if(Operands.Length == 0)
    {
@@ -265,7 +265,7 @@ static machine_code Encode(opcode_pattern Opcode, string Operands, instruction_g
    bool Is_Branch = (Group_Code == INSTRCODE_BRANCH);
    bool Is_Jump = (Group_Code == INSTRCODE_GROUP3 && Opcode == OPCODE_JMP);
 
-   instruction_data Data = Parse_Operands(Operands, Is_Branch, Is_Jump);
+   parsed_instruction_data Data = Parse_Operands(Operands, Is_Branch, Is_Jump);
    u8 Addressing_Code = Addressing_Mode_Patterns[Group_Code][Data.Addressing_Mode];
    // printf("%-20s | ", Addressing_Mode_Names[Data.Addressing_Mode]);
 
@@ -281,92 +281,154 @@ static machine_code Encode(opcode_pattern Opcode, string Operands, instruction_g
    return(Result);
 }
 
+#define MNEMONICS_LIST                          \
+   X(ora) X(and) X(eor) X(adc)                  \
+   X(sta) X(lda) X(cmp) X(sbc)                  \
+                                                \
+   X(asl) X(rol) X(lsr) X(ror)                  \
+   X(stx) X(ldx) X(dec) X(inc)                  \
+                                                \
+   X(bit) X(jmp) X(sty) X(ldy)                  \
+   X(cpy) X(cpx)                                \
+                                                \
+   X(bpl) X(bmi) X(bvc) X(bvs)                  \
+   X(bcc) X(bcs) X(bne) X(beq)                  \
+                                                \
+   X(jsr)                                       \
+                                                \
+   X(brk) X(rti) X(rts) X(php)                  \
+   X(plp) X(pha) X(pla) X(dey)                  \
+   X(tay) X(iny) X(inx) X(clc)                  \
+   X(sec) X(cli) X(sei) X(tya)                  \
+   X(clv) X(cld) X(sed) X(txa)                  \
+   X(txs) X(tax) X(tsx) X(dex)                  \
+   X(nop)
+
+enum
+{
+#define X(M) MNEMONIC_##M,
+   MNEMONICS_LIST
+#undef X
+   MNEMONIC_COUNT,
+};
+
+typedef struct {
+   // NOTE: Full value for non-group encodings.
+   u8 Actual_Value;
+
+   // NOTE: Bit patterns for group-based encodings.
+   opcode_pattern Opcode;
+   instruction_group_code Group_Code;
+} encoding_data;
+
+static encoding_data Encoding_Table[] =
+{
+   // Group 1
+   [MNEMONIC_ora] = {0, OPCODE_ORA, INSTRCODE_GROUP1},
+   [MNEMONIC_and] = {0, OPCODE_AND, INSTRCODE_GROUP1},
+   [MNEMONIC_eor] = {0, OPCODE_EOR, INSTRCODE_GROUP1},
+   [MNEMONIC_adc] = {0, OPCODE_ADC, INSTRCODE_GROUP1},
+   [MNEMONIC_sta] = {0, OPCODE_STA, INSTRCODE_GROUP1},
+   [MNEMONIC_lda] = {0, OPCODE_LDA, INSTRCODE_GROUP1},
+   [MNEMONIC_cmp] = {0, OPCODE_CMP, INSTRCODE_GROUP1},
+   [MNEMONIC_sbc] = {0, OPCODE_SBC, INSTRCODE_GROUP1},
+
+   // Group 2
+   [MNEMONIC_asl] = {0, OPCODE_ASL, INSTRCODE_GROUP2},
+   [MNEMONIC_rol] = {0, OPCODE_ROL, INSTRCODE_GROUP2},
+   [MNEMONIC_lsr] = {0, OPCODE_LSR, INSTRCODE_GROUP2},
+   [MNEMONIC_ror] = {0, OPCODE_ROR, INSTRCODE_GROUP2},
+   [MNEMONIC_stx] = {0, OPCODE_STX, INSTRCODE_GROUP2},
+   [MNEMONIC_ldx] = {0, OPCODE_LDX, INSTRCODE_GROUP2},
+   [MNEMONIC_dec] = {0, OPCODE_DEC, INSTRCODE_GROUP2},
+   [MNEMONIC_inc] = {0, OPCODE_INC, INSTRCODE_GROUP2},
+
+   // Group 3
+   [MNEMONIC_bit] = {0, OPCODE_BIT, INSTRCODE_GROUP3},
+   [MNEMONIC_jmp] = {0, OPCODE_JMP, INSTRCODE_GROUP3},
+   [MNEMONIC_sty] = {0, OPCODE_STY, INSTRCODE_GROUP3},
+   [MNEMONIC_ldy] = {0, OPCODE_LDY, INSTRCODE_GROUP3},
+   [MNEMONIC_cpy] = {0, OPCODE_CPY, INSTRCODE_GROUP3},
+   [MNEMONIC_cpx] = {0, OPCODE_CPX, INSTRCODE_GROUP3},
+
+   // Branches
+   [MNEMONIC_bpl] = {0, OPCODE_BPL, INSTRCODE_BRANCH},
+   [MNEMONIC_bmi] = {0, OPCODE_BMI, INSTRCODE_BRANCH},
+   [MNEMONIC_bvc] = {0, OPCODE_BVC, INSTRCODE_BRANCH},
+   [MNEMONIC_bvs] = {0, OPCODE_BVS, INSTRCODE_BRANCH},
+   [MNEMONIC_bcc] = {0, OPCODE_BCC, INSTRCODE_BRANCH},
+   [MNEMONIC_bcs] = {0, OPCODE_BCS, INSTRCODE_BRANCH},
+   [MNEMONIC_bne] = {0, OPCODE_BNE, INSTRCODE_BRANCH},
+   [MNEMONIC_beq] = {0, OPCODE_BEQ, INSTRCODE_BRANCH},
+
+   [MNEMONIC_jsr] = {0, OPCODE_JSR, INSTRCODE_JSR},
+
+   // Single-byte
+   [MNEMONIC_brk] = {0x00},
+   [MNEMONIC_rti] = {0x40},
+   [MNEMONIC_rts] = {0x60},
+
+   [MNEMONIC_php] = {0x08},
+   [MNEMONIC_plp] = {0x28},
+   [MNEMONIC_pha] = {0x48},
+   [MNEMONIC_pla] = {0x68},
+   [MNEMONIC_dey] = {0x88},
+   [MNEMONIC_tay] = {0xA8},
+   [MNEMONIC_iny] = {0xC8},
+   [MNEMONIC_inx] = {0xE8},
+
+   [MNEMONIC_clc] = {0x18},
+   [MNEMONIC_sec] = {0x38},
+   [MNEMONIC_cli] = {0x58},
+   [MNEMONIC_sei] = {0x78},
+   [MNEMONIC_tya] = {0x98},
+   [MNEMONIC_clv] = {0xB8},
+   [MNEMONIC_cld] = {0xD8},
+   [MNEMONIC_sed] = {0xF8},
+
+   [MNEMONIC_txa] = {0x8A},
+   [MNEMONIC_txs] = {0x9A},
+   [MNEMONIC_tax] = {0xAA},
+   [MNEMONIC_tsx] = {0xBA},
+   [MNEMONIC_dex] = {0xCA},
+   [MNEMONIC_nop] = {0xEA},
+};
+
+static map *Encoding_Map;
+
 static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
 {
    machine_code Result = {0};
-   (void)Context;
 
-   // TODO: Collapse all this down into a hash table or something.
+   if(!Encoding_Map)
+   {
+      assert(Array_Count(Encoding_Table) == MNEMONIC_COUNT);
+#define X(M) Insert(&Context.Arena, &Encoding_Map, S(#M), MNEMONIC_##M);
+      MNEMONICS_LIST;
+#undef X
+   }
+
    // TODO: Support other whitespace characters.
    cut Instruction_Operands = Cut(Instruction, ' ');
-   if(Instruction_Operands.Found)
+   string Mnemonic = Instruction_Operands.Before;
+   string Operands = Trim_Left(Instruction_Operands.After);
+
+   lookup_result Mnemonic_Lookup = Lookup(Encoding_Map, Mnemonic);
+   if(Mnemonic_Lookup.Found)
    {
-      string Mnemonic = Instruction_Operands.Before;
-      string Operands = Trim_Left(Instruction_Operands.After);
-
-      // Group 1 instructions.
-      if     (Equals(Mnemonic, S("ora"))) Result = Encode(OPCODE_ORA, Operands, INSTRCODE_GROUP1);
-      else if(Equals(Mnemonic, S("and"))) Result = Encode(OPCODE_AND, Operands, INSTRCODE_GROUP1);
-      else if(Equals(Mnemonic, S("eor"))) Result = Encode(OPCODE_EOR, Operands, INSTRCODE_GROUP1);
-      else if(Equals(Mnemonic, S("adc"))) Result = Encode(OPCODE_ADC, Operands, INSTRCODE_GROUP1);
-      else if(Equals(Mnemonic, S("sta"))) Result = Encode(OPCODE_STA, Operands, INSTRCODE_GROUP1);
-      else if(Equals(Mnemonic, S("lda"))) Result = Encode(OPCODE_LDA, Operands, INSTRCODE_GROUP1);
-      else if(Equals(Mnemonic, S("cmp"))) Result = Encode(OPCODE_CMP, Operands, INSTRCODE_GROUP1);
-      else if(Equals(Mnemonic, S("sbc"))) Result = Encode(OPCODE_SBC, Operands, INSTRCODE_GROUP1);
-
-      // Group 2 instructions.
-      else if(Equals(Mnemonic, S("asl"))) Result = Encode(OPCODE_ASL, Operands, INSTRCODE_GROUP2);
-      else if(Equals(Mnemonic, S("rol"))) Result = Encode(OPCODE_ROL, Operands, INSTRCODE_GROUP2);
-      else if(Equals(Mnemonic, S("lsr"))) Result = Encode(OPCODE_LSR, Operands, INSTRCODE_GROUP2);
-      else if(Equals(Mnemonic, S("ror"))) Result = Encode(OPCODE_ROR, Operands, INSTRCODE_GROUP2);
-      else if(Equals(Mnemonic, S("stx"))) Result = Encode(OPCODE_STX, Operands, INSTRCODE_GROUP2);
-      else if(Equals(Mnemonic, S("ldx"))) Result = Encode(OPCODE_LDX, Operands, INSTRCODE_GROUP2);
-      else if(Equals(Mnemonic, S("dec"))) Result = Encode(OPCODE_DEC, Operands, INSTRCODE_GROUP2);
-      else if(Equals(Mnemonic, S("inc"))) Result = Encode(OPCODE_INC, Operands, INSTRCODE_GROUP2);
-
-      // Group 3 instructions.
-      else if(Equals(Mnemonic, S("bit"))) Result = Encode(OPCODE_BIT, Operands, INSTRCODE_GROUP3);
-      else if(Equals(Mnemonic, S("jmp"))) Result = Encode(OPCODE_JMP, Operands, INSTRCODE_GROUP3);
-      else if(Equals(Mnemonic, S("sty"))) Result = Encode(OPCODE_STY, Operands, INSTRCODE_GROUP3);
-      else if(Equals(Mnemonic, S("ldy"))) Result = Encode(OPCODE_LDY, Operands, INSTRCODE_GROUP3);
-      else if(Equals(Mnemonic, S("cpy"))) Result = Encode(OPCODE_CPY, Operands, INSTRCODE_GROUP3);
-      else if(Equals(Mnemonic, S("cpx"))) Result = Encode(OPCODE_CPX, Operands, INSTRCODE_GROUP3);
-
-      // Branch instructions.
-      else if(Equals(Mnemonic, S("bpl"))) Result = Encode(OPCODE_BPL, Operands, INSTRCODE_BRANCH);
-      else if(Equals(Mnemonic, S("bmi"))) Result = Encode(OPCODE_BMI, Operands, INSTRCODE_BRANCH);
-      else if(Equals(Mnemonic, S("bvc"))) Result = Encode(OPCODE_BVC, Operands, INSTRCODE_BRANCH);
-      else if(Equals(Mnemonic, S("bvs"))) Result = Encode(OPCODE_BVS, Operands, INSTRCODE_BRANCH);
-      else if(Equals(Mnemonic, S("bcc"))) Result = Encode(OPCODE_BCC, Operands, INSTRCODE_BRANCH);
-      else if(Equals(Mnemonic, S("bcs"))) Result = Encode(OPCODE_BCS, Operands, INSTRCODE_BRANCH);
-      else if(Equals(Mnemonic, S("bne"))) Result = Encode(OPCODE_BNE, Operands, INSTRCODE_BRANCH);
-      else if(Equals(Mnemonic, S("beq"))) Result = Encode(OPCODE_BEQ, Operands, INSTRCODE_BRANCH);
-
-      else if(Equals(Mnemonic, S("jsr"))) Result = Encode(OPCODE_JSR, Operands, INSTRCODE_JSR);
+      encoding_data Data = Encoding_Table[Mnemonic_Lookup.Value];
+      if(Instruction_Operands.Found)
+      {
+         Result = Encode(Data.Opcode, Operands, Data.Group_Code);
+      }
+      else
+      {
+         Result.Bytes[Result.Length++] = Data.Actual_Value;
+      }
    }
    else
    {
-      // Single-byte instructions.
-      if     (Equals(Instruction, S("brk"))) Result.Bytes[Result.Length++] = 0x00;
-      else if(Equals(Instruction, S("rti"))) Result.Bytes[Result.Length++] = 0x40;
-      else if(Equals(Instruction, S("rts"))) Result.Bytes[Result.Length++] = 0x60;
-
-      else if(Equals(Instruction, S("php"))) Result.Bytes[Result.Length++] = 0x08;
-      else if(Equals(Instruction, S("plp"))) Result.Bytes[Result.Length++] = 0x28;
-      else if(Equals(Instruction, S("pha"))) Result.Bytes[Result.Length++] = 0x48;
-      else if(Equals(Instruction, S("pla"))) Result.Bytes[Result.Length++] = 0x68;
-      else if(Equals(Instruction, S("dey"))) Result.Bytes[Result.Length++] = 0x88;
-      else if(Equals(Instruction, S("tay"))) Result.Bytes[Result.Length++] = 0xA8;
-      else if(Equals(Instruction, S("iny"))) Result.Bytes[Result.Length++] = 0xC8;
-      else if(Equals(Instruction, S("inx"))) Result.Bytes[Result.Length++] = 0xE8;
-
-      else if(Equals(Instruction, S("clc"))) Result.Bytes[Result.Length++] = 0x18;
-      else if(Equals(Instruction, S("sec"))) Result.Bytes[Result.Length++] = 0x38;
-      else if(Equals(Instruction, S("cli"))) Result.Bytes[Result.Length++] = 0x58;
-      else if(Equals(Instruction, S("sei"))) Result.Bytes[Result.Length++] = 0x78;
-      else if(Equals(Instruction, S("tya"))) Result.Bytes[Result.Length++] = 0x98;
-      else if(Equals(Instruction, S("clv"))) Result.Bytes[Result.Length++] = 0xB8;
-      else if(Equals(Instruction, S("cld"))) Result.Bytes[Result.Length++] = 0xD8;
-      else if(Equals(Instruction, S("sed"))) Result.Bytes[Result.Length++] = 0xF8;
-
-      else if(Equals(Instruction, S("txa"))) Result.Bytes[Result.Length++] = 0x8A;
-      else if(Equals(Instruction, S("txs"))) Result.Bytes[Result.Length++] = 0x9A;
-      else if(Equals(Instruction, S("tax"))) Result.Bytes[Result.Length++] = 0xAA;
-      else if(Equals(Instruction, S("tsx"))) Result.Bytes[Result.Length++] = 0xBA;
-      else if(Equals(Instruction, S("dex"))) Result.Bytes[Result.Length++] = 0xCA;
-      else if(Equals(Instruction, S("nop"))) Result.Bytes[Result.Length++] = 0xEA;
-
-      // printf("%-20s | ", Addressing_Mode_Names[ADDRMODE_IMPLIED]);
+      Report_Error("Did not recognize mnemonic \"%.*s\".\n", (int)Mnemonic.Length, Mnemonic.Data);
    }
 
    return(Result);
