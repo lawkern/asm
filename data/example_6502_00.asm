@@ -114,9 +114,9 @@ Test3:
 
     ldx 0x01                    \ Immediate
     ldx [0x01]                  \ Zero page address
-    ldx [0x01 + x]              \ Zero page address + x-offset
+    ldx [0x01 + y]              \ Zero page address + y-offset
     ldx [0x0123]                \ Absolute address
-    ldx [0x0123 + x]            \ Absolute address + x-offset
+    ldx [0x0123 + y]            \ Absolute address + y-offset
 
     dec [0x01]                  \ Zero page address
     dec [0x01 + x]              \ Zero page address + x-offset

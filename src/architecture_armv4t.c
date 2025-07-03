@@ -40,15 +40,21 @@ typedef enum {
    OPCODE_MVN = 0xF, // Move Not
 } opcode;
 
-static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
+static INITIALIZE_ARCHITECTURE(Initialize_Architecture)
 {
+   (void)Context;
+}
+
+static ENCODE_INSTRUCTION(Encode_Instruction)
+{
+   (void)Context;
    (void)Instruction;
 
    machine_code Result = {0};
    return(Result);
 }
 
-static PATCH_LABEL_ADDRESS(Patch_Label_Address)
+static PATCH_INSTRUCTION(Patch_Instruction)
 {
    (void)Result;
    (void)Instruction_Address;

@@ -1,286 +1,5 @@
 /* (c) copyright 2025 Lawrence D. Kern /////////////////////////////////////// */
 
-typedef enum {
-   ADDRMODE_IMPLIED,
-   ADDRMODE_ACCUMULATOR,
-   ADDRMODE_IMMEDIATE,
-   ADDRMODE_ZEROPAGE,
-   ADDRMODE_ZEROPAGEX,
-   ADDRMODE_ZEROPAGEY,
-   ADDRMODE_ABSOLUTE,
-   ADDRMODE_ABSOLUTEX,
-   ADDRMODE_ABSOLUTEY,
-   ADDRMODE_INDIRECT,
-   ADDRMODE_INDIRECTX,
-   ADDRMODE_INDIRECTY,
-   ADDRMODE_RELATIVE,
-
-   ADDRMODE_COUNT,
-} addressing_mode;
-
-typedef enum {
-   ADDRMODE_FLAG_IMPLIED     = (1 << ADDRMODE_IMPLIED),
-   ADDRMODE_FLAG_ACCUMULATOR = (1 << ADDRMODE_ACCUMULATOR),
-   ADDRMODE_FLAG_IMMEDIATE   = (1 << ADDRMODE_IMMEDIATE),
-   ADDRMODE_FLAG_ZEROPAGE    = (1 << ADDRMODE_ZEROPAGE),
-   ADDRMODE_FLAG_ZEROPAGEX   = (1 << ADDRMODE_ZEROPAGEX),
-   ADDRMODE_FLAG_ZEROPAGEY   = (1 << ADDRMODE_ZEROPAGEY),
-   ADDRMODE_FLAG_ABSOLUTE    = (1 << ADDRMODE_ABSOLUTE),
-   ADDRMODE_FLAG_ABSOLUTEX   = (1 << ADDRMODE_ABSOLUTEX),
-   ADDRMODE_FLAG_ABSOLUTEY   = (1 << ADDRMODE_ABSOLUTEY),
-   ADDRMODE_FLAG_INDIRECT    = (1 << ADDRMODE_INDIRECT),
-   ADDRMODE_FLAG_INDIRECTX   = (1 << ADDRMODE_INDIRECTX),
-   ADDRMODE_FLAG_INDIRECTY   = (1 << ADDRMODE_INDIRECTY),
-   ADDRMODE_FLAG_RELATIVE    = (1 << ADDRMODE_RELATIVE),
-} addressing_mode_flag;
-
-// static char *Addressing_Mode_Names[ADDRMODE_COUNT] =
-// {
-//    [ADDRMODE_IMPLIED]     = "Implied",
-//    [ADDRMODE_ACCUMULATOR] = "Accumulator",
-//    [ADDRMODE_IMMEDIATE]   = "Immediate",
-//    [ADDRMODE_ZEROPAGE]    = "Zero Page",
-//    [ADDRMODE_ZEROPAGEX]   = "Zero Page + X",
-//    [ADDRMODE_ZEROPAGEY]   = "Zero Page + Y",
-//    [ADDRMODE_ABSOLUTE]    = "Absolute Address",
-//    [ADDRMODE_ABSOLUTEX]   = "Absolute Address + X",
-//    [ADDRMODE_ABSOLUTEY]   = "Absolute Address + Y",
-//    [ADDRMODE_INDIRECT]    = "Indirect Address",
-//    [ADDRMODE_INDIRECTX]   = "Indirect Address + X",
-//    [ADDRMODE_INDIRECTY]   = "Indirect Address + Y",
-//    [ADDRMODE_RELATIVE]    = "Relative Address",
-// };
-
-typedef struct {
-   addressing_mode Addressing_Mode;
-   string Label_Operand;
-
-   int Length;
-   u8 Bytes[2];
-
-   bool Ok;
-} parsed_instruction_data;
-
-static bool Parse_And_Populate_Data_Bytes(parsed_instruction_data *Result, string Operands, bool Is_Branch, bool Is_Jump)
-{
-   bool Ok = false;
-
-   if(Operands.Length && Operands.Data[0] >= '0' && Operands.Data[0] <= '9')
-   {
-      // Number literal
-      parsed_integer Parsed_Number = Parse_Integer(Operands);
-      if(Parsed_Number.Ok)
-      {
-         // TODO: Negative values?
-         Result->Length = (Is_Jump || Parsed_Number.Value > 0xFF) ? 2 : 1;
-         Result->Bytes[0] = (u8)Parsed_Number.Value;
-         Result->Bytes[1] = (u8)(Parsed_Number.Value >> 8);
-         Ok = true;
-      }
-   }
-   else
-   {
-      lookup_result Constant = Lookup(Context.Constants, Operands);
-      if(Constant.Found)
-      {
-         // TODO: Negative values?
-         Result->Length = (Is_Jump || Constant.Value > 0xFF) ? 2 : 1;
-         Result->Bytes[0] = (u8)Constant.Value;
-         Result->Bytes[1] = (u8)(Constant.Value >> 8);
-      }
-      else
-      {
-         // Label (to be populated later)
-         Result->Length = (Is_Branch) ? 1 : 2;
-         Result->Bytes[0] = 0xBE;
-         Result->Bytes[1] = 0xEF;
-         Result->Label_Operand = Operands;
-      }
-   }
-
-   return(Ok);
-}
-
-static parsed_instruction_data Parse_Operands(string Operands, bool Is_Branch, bool Is_Jump)
-{
-   // TODO: Enforce syntax requirements.
-
-   parsed_instruction_data Result = {0};
-
-   if(Operands.Length == 0)
-   {
-      Result.Addressing_Mode = ADDRMODE_IMPLIED;
-      Result.Ok = true;
-   }
-   else if(Equals(Operands, S("a")))
-   {
-      Result.Addressing_Mode = ADDRMODE_ACCUMULATOR;
-      Result.Ok = true;
-   }
-   else if(Has_Prefix_Then_Remove(&Operands, S("[[")))
-   {
-      if(Has_Suffix_Then_Remove(&Operands, S(" + x]]")))
-      {
-         Result.Addressing_Mode = ADDRMODE_INDIRECTX;
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
-      }
-      else if(Has_Suffix_Then_Remove(&Operands, S("] + y]")))
-      {
-         Result.Addressing_Mode = ADDRMODE_INDIRECTY;
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
-      }
-   }
-   else if(Has_Prefix_Then_Remove(&Operands, S("[")))
-   {
-      if(Has_Suffix_Then_Remove(&Operands, S(" + x]")))
-      {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
-         Result.Addressing_Mode = (Result.Length == 2) ? ADDRMODE_ABSOLUTEX : ADDRMODE_ZEROPAGEX;
-      }
-      else if(Has_Suffix_Then_Remove(&Operands, S(" + y]")))
-      {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
-         Result.Addressing_Mode = (Result.Length == 2) ? ADDRMODE_ABSOLUTEY : ADDRMODE_ZEROPAGEY;
-      }
-      else if(Has_Suffix_Then_Remove(&Operands, S("]")))
-      {
-         Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
-         Result.Addressing_Mode = (Result.Length == 2)
-            ? (Is_Jump) ? ADDRMODE_INDIRECT : ADDRMODE_ABSOLUTE
-            : ADDRMODE_ZEROPAGE;
-      }
-   }
-   else if(Operands.Data[0] >= '0' && Operands.Data[0] <= '9')
-   {
-      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
-      Result.Addressing_Mode = (Result.Length == 2)
-         ? ADDRMODE_ABSOLUTE
-         : (Is_Branch) ? ADDRMODE_RELATIVE : ADDRMODE_IMMEDIATE;
-   }
-   else // Label
-   {
-      Result.Ok = Parse_And_Populate_Data_Bytes(&Result, Operands, Is_Branch, Is_Jump);
-      Result.Addressing_Mode = (Is_Branch) ? ADDRMODE_RELATIVE : ADDRMODE_ABSOLUTE;
-   }
-
-   return(Result);
-}
-
-typedef enum {
-   // Group 1.
-   OPCODE_ORA = 0x0,
-   OPCODE_AND = 0x1,
-   OPCODE_EOR = 0x2,
-   OPCODE_ADC = 0x3,
-   OPCODE_STA = 0x4,
-   OPCODE_LDA = 0x5,
-   OPCODE_CMP = 0x6,
-   OPCODE_SBC = 0x7,
-
-   // Group 2.
-   OPCODE_ASL = 0x0,
-   OPCODE_ROL = 0x1,
-   OPCODE_LSR = 0x2,
-   OPCODE_ROR = 0x3,
-   OPCODE_STX = 0x4,
-   OPCODE_LDX = 0x5,
-   OPCODE_DEC = 0x6,
-   OPCODE_INC = 0x7,
-
-   // Group 3.
-   OPCODE_BIT    = 0x1,
-   OPCODE_JMP    = 0x2,
-   OPCODE_JMPABS = 0x3,
-   OPCODE_STY    = 0x4,
-   OPCODE_LDY    = 0x5,
-   OPCODE_CPY    = 0x6,
-   OPCODE_CPX    = 0x7,
-
-   // Branches.
-   OPCODE_BPL = 0x10,
-   OPCODE_BMI = 0x30,
-   OPCODE_BVC = 0x50,
-   OPCODE_BVS = 0x70,
-   OPCODE_BCC = 0x90,
-   OPCODE_BCS = 0xB0,
-   OPCODE_BNE = 0xD0,
-   OPCODE_BEQ = 0xF0,
-
-   // Special case.
-   OPCODE_JSR = 0x20,
-} opcode_pattern;
-
-typedef enum {
-   INSTRCODE_GROUP3 = 0x00,
-   INSTRCODE_GROUP1 = 0x01,
-   INSTRCODE_GROUP2 = 0x02,
-   INSTRCODE_BRANCH = 0x03, // Only for identification, not part of encoding.
-   INSTRCODE_JSR    = 0x04  // Only for identification, not part of encoding.
-} instruction_group_code;
-
-// TODO: Mark illegal indices with unused value.
-static u8 Addressing_Mode_Patterns[][ADDRMODE_COUNT] =
-{
-   [INSTRCODE_GROUP1] =
-   {
-      [ADDRMODE_INDIRECTX]   = 0x0,
-      [ADDRMODE_ZEROPAGE]    = 0x1,
-      [ADDRMODE_IMMEDIATE]   = 0x2,
-      [ADDRMODE_ABSOLUTE]    = 0x3,
-      [ADDRMODE_INDIRECTY]   = 0x4,
-      [ADDRMODE_ZEROPAGEX]   = 0x5,
-      [ADDRMODE_ABSOLUTEY]   = 0x6,
-      [ADDRMODE_ABSOLUTEX]   = 0x7,
-   },
-   [INSTRCODE_GROUP2] =
-   {
-      [ADDRMODE_IMMEDIATE]   = 0x0,
-      [ADDRMODE_ZEROPAGE]    = 0x1,
-      [ADDRMODE_ACCUMULATOR] = 0x2,
-      [ADDRMODE_ABSOLUTE]    = 0x3,
-      [ADDRMODE_ZEROPAGEX]   = 0x5,
-      [ADDRMODE_ABSOLUTEX]   = 0x7,
-   },
-   [INSTRCODE_GROUP3] =
-   {
-      [ADDRMODE_IMMEDIATE] = 0x0,
-      [ADDRMODE_ZEROPAGE]  = 0x1,
-      [ADDRMODE_ABSOLUTE]  = 0x3,
-      [ADDRMODE_ZEROPAGEX] = 0x5,
-      [ADDRMODE_ABSOLUTEX] = 0x7,
-   },
-   [INSTRCODE_BRANCH] = {0},
-};
-
-static machine_code Encode(opcode_pattern Opcode, string Operands, instruction_group_code Group_Code)
-{
-   // Group 1 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 01)
-   // Group 2 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 10)
-   // Group 3 layout: aaabbbcc (aaa = OPCODE, bbb = ADDRMODE, cc = 00)
-   // Branch layout:  xxy10000 (xx = FLAG, y = TAKEN)
-
-   // NOTE: Instruction jsr is a special case that doesn't follow the other
-   // group encoding patterns, so we just use opcode directly.
-
-   bool Is_Branch = (Group_Code == INSTRCODE_BRANCH);
-   bool Is_Jump = (Group_Code == INSTRCODE_GROUP3 && Opcode == OPCODE_JMP);
-
-   parsed_instruction_data Data = Parse_Operands(Operands, Is_Branch, Is_Jump);
-   u8 Addressing_Code = Addressing_Mode_Patterns[Group_Code][Data.Addressing_Mode];
-   // printf("%-20s | ", Addressing_Mode_Names[Data.Addressing_Mode]);
-
-   machine_code Result = {0};
-   Result.Length = 1 + Data.Length;
-   Result.Bytes[0] = (Is_Branch || Group_Code == INSTRCODE_JSR)
-      ? Opcode
-      : (Opcode << 5) | (Addressing_Code << 2) | Group_Code;
-   Result.Bytes[1] = Data.Bytes[0];
-   Result.Bytes[2] = Data.Bytes[1];
-   Result.Label_Operand = Data.Label_Operand;
-
-   return(Result);
-}
-
 #define MNEMONICS_LIST                          \
    X(ora) X(and) X(eor) X(adc)                  \
    X(sta) X(lda) X(cmp) X(sbc)                  \
@@ -306,124 +25,448 @@ static machine_code Encode(opcode_pattern Opcode, string Operands, instruction_g
 
 enum
 {
-#define X(M) MNEMONIC_##M,
+#  define X(M) MNEMONIC_##M,
    MNEMONICS_LIST
-#undef X
+#  undef X
    MNEMONIC_COUNT,
 };
 
+typedef enum {
+   ADDRMODE_IMPLIED,
+   ADDRMODE_ACCUMULATOR,
+   ADDRMODE_IMMEDIATE,
+   ADDRMODE_ZEROPAGE,
+   ADDRMODE_ZEROPAGEX,
+   ADDRMODE_ZEROPAGEY,
+   ADDRMODE_ABSOLUTE,
+   ADDRMODE_ABSOLUTEX,
+   ADDRMODE_ABSOLUTEY,
+   ADDRMODE_INDIRECT,
+   ADDRMODE_INDIRECTX,
+   ADDRMODE_INDIRECTY,
+   ADDRMODE_RELATIVE,
+
+   ADDRMODE_COUNT,
+} addressing_mode;
+
 typedef struct {
-   // NOTE: Full value for non-group encodings.
-   u8 Actual_Value;
+   u8 Opcode;
+   u8 Encoding_Length;
+} opcode_data;
 
-   // NOTE: Bit patterns for group-based encodings.
-   opcode_pattern Opcode;
-   instruction_group_code Group_Code;
-} encoding_data;
-
-static encoding_data Encoding_Table[] =
+static opcode_data Encoding_Table[][ADDRMODE_COUNT] =
 {
-   // Group 1
-   [MNEMONIC_ora] = {0, OPCODE_ORA, INSTRCODE_GROUP1},
-   [MNEMONIC_and] = {0, OPCODE_AND, INSTRCODE_GROUP1},
-   [MNEMONIC_eor] = {0, OPCODE_EOR, INSTRCODE_GROUP1},
-   [MNEMONIC_adc] = {0, OPCODE_ADC, INSTRCODE_GROUP1},
-   [MNEMONIC_sta] = {0, OPCODE_STA, INSTRCODE_GROUP1},
-   [MNEMONIC_lda] = {0, OPCODE_LDA, INSTRCODE_GROUP1},
-   [MNEMONIC_cmp] = {0, OPCODE_CMP, INSTRCODE_GROUP1},
-   [MNEMONIC_sbc] = {0, OPCODE_SBC, INSTRCODE_GROUP1},
+   // Group 1 Instructions
+   [MNEMONIC_ora] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0x09, 2},
+      [ADDRMODE_ZEROPAGE]  = {0x05, 2},
+      [ADDRMODE_ZEROPAGEX] = {0x15, 2},
+      [ADDRMODE_ABSOLUTE]  = {0x0D, 3},
+      [ADDRMODE_ABSOLUTEX] = {0x1D, 3},
+      [ADDRMODE_ABSOLUTEY] = {0x19, 3},
+      [ADDRMODE_INDIRECTX] = {0x01, 2},
+      [ADDRMODE_INDIRECTY] = {0x11, 2},
+   },
+   [MNEMONIC_and] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0x29, 2},
+      [ADDRMODE_ZEROPAGE]  = {0x25, 2},
+      [ADDRMODE_ZEROPAGEX] = {0x35, 2},
+      [ADDRMODE_ABSOLUTE]  = {0x2D, 3},
+      [ADDRMODE_ABSOLUTEX] = {0x3D, 3},
+      [ADDRMODE_ABSOLUTEY] = {0x39, 3},
+      [ADDRMODE_INDIRECTX] = {0x21, 2},
+      [ADDRMODE_INDIRECTY] = {0x31, 2},
+   },
+   [MNEMONIC_eor] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0x49, 2},
+      [ADDRMODE_ZEROPAGE]  = {0x45, 2},
+      [ADDRMODE_ZEROPAGEX] = {0x55, 2},
+      [ADDRMODE_ABSOLUTE]  = {0x4D, 3},
+      [ADDRMODE_ABSOLUTEX] = {0x5D, 3},
+      [ADDRMODE_ABSOLUTEY] = {0x59, 3},
+      [ADDRMODE_INDIRECTX] = {0x41, 2},
+      [ADDRMODE_INDIRECTY] = {0x51, 2},
+   },
+   [MNEMONIC_adc] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0x69, 2},
+      [ADDRMODE_ZEROPAGE]  = {0x65, 2},
+      [ADDRMODE_ZEROPAGEX] = {0x75, 2},
+      [ADDRMODE_ABSOLUTE]  = {0x6D, 3},
+      [ADDRMODE_ABSOLUTEX] = {0x7D, 3},
+      [ADDRMODE_ABSOLUTEY] = {0x79, 3},
+      [ADDRMODE_INDIRECTX] = {0x61, 2},
+      [ADDRMODE_INDIRECTY] = {0x71, 2},
+   },
+   [MNEMONIC_sta] =
+   {
+      [ADDRMODE_ZEROPAGE]  = {0x85, 2},
+      [ADDRMODE_ZEROPAGEX] = {0x95, 2},
+      [ADDRMODE_ABSOLUTE]  = {0x8D, 3},
+      [ADDRMODE_ABSOLUTEX] = {0x9D, 3},
+      [ADDRMODE_ABSOLUTEY] = {0x99, 3},
+      [ADDRMODE_INDIRECTX] = {0x81, 2},
+      [ADDRMODE_INDIRECTY] = {0x91, 2},
+   },
+   [MNEMONIC_lda] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0xA9, 2},
+      [ADDRMODE_ZEROPAGE]  = {0xA5, 2},
+      [ADDRMODE_ZEROPAGEX] = {0xB5, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xAD, 3},
+      [ADDRMODE_ABSOLUTEX] = {0xBD, 3},
+      [ADDRMODE_ABSOLUTEY] = {0xB9, 3},
+      [ADDRMODE_INDIRECTX] = {0xA1, 2},
+      [ADDRMODE_INDIRECTY] = {0xB1, 2},
+   },
+   [MNEMONIC_cmp] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0xC9, 2},
+      [ADDRMODE_ZEROPAGE]  = {0xC5, 2},
+      [ADDRMODE_ZEROPAGEX] = {0xD5, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xCD, 3},
+      [ADDRMODE_ABSOLUTEX] = {0xDD, 3},
+      [ADDRMODE_ABSOLUTEY] = {0xD9, 3},
+      [ADDRMODE_INDIRECTX] = {0xC1, 2},
+      [ADDRMODE_INDIRECTY] = {0xD1, 2},
+   },
+   [MNEMONIC_sbc] = {
+      [ADDRMODE_IMMEDIATE] = {0xE9, 2},
+      [ADDRMODE_ZEROPAGE]  = {0xE5, 2},
+      [ADDRMODE_ZEROPAGEX] = {0xF5, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xED, 3},
+      [ADDRMODE_ABSOLUTEX] = {0xFD, 3},
+      [ADDRMODE_ABSOLUTEY] = {0xF9, 3},
+      [ADDRMODE_INDIRECTX] = {0xE1, 2},
+      [ADDRMODE_INDIRECTY] = {0xF1, 2},
+   },
 
-   // Group 2
-   [MNEMONIC_asl] = {0, OPCODE_ASL, INSTRCODE_GROUP2},
-   [MNEMONIC_rol] = {0, OPCODE_ROL, INSTRCODE_GROUP2},
-   [MNEMONIC_lsr] = {0, OPCODE_LSR, INSTRCODE_GROUP2},
-   [MNEMONIC_ror] = {0, OPCODE_ROR, INSTRCODE_GROUP2},
-   [MNEMONIC_stx] = {0, OPCODE_STX, INSTRCODE_GROUP2},
-   [MNEMONIC_ldx] = {0, OPCODE_LDX, INSTRCODE_GROUP2},
-   [MNEMONIC_dec] = {0, OPCODE_DEC, INSTRCODE_GROUP2},
-   [MNEMONIC_inc] = {0, OPCODE_INC, INSTRCODE_GROUP2},
+   // Group 2 Instructions
+   [MNEMONIC_asl] =
+   {
+      [ADDRMODE_ACCUMULATOR] = {0x0A, 1},
+      [ADDRMODE_ZEROPAGE]    = {0x06, 2},
+      [ADDRMODE_ZEROPAGEX]   = {0x16, 2},
+      [ADDRMODE_ABSOLUTE]    = {0x0E, 3},
+      [ADDRMODE_ABSOLUTEX]   = {0x1E, 3},
+   },
+   [MNEMONIC_rol] =
+   {
+      [ADDRMODE_ACCUMULATOR] = {0x2A, 1},
+      [ADDRMODE_ZEROPAGE]    = {0x26, 2},
+      [ADDRMODE_ZEROPAGEX]   = {0x36, 2},
+      [ADDRMODE_ABSOLUTE]    = {0x2E, 3},
+      [ADDRMODE_ABSOLUTEX]   = {0x3E, 3},
+   },
+   [MNEMONIC_lsr] =
+   {
+      [ADDRMODE_ACCUMULATOR] = {0x4A, 1},
+      [ADDRMODE_ZEROPAGE]    = {0x46, 2},
+      [ADDRMODE_ZEROPAGEX]   = {0x56, 2},
+      [ADDRMODE_ABSOLUTE]    = {0x4E, 3},
+      [ADDRMODE_ABSOLUTEX]   = {0x5E, 3},
+   },
+   [MNEMONIC_ror] =
+   {
+      [ADDRMODE_ACCUMULATOR] = {0x6A, 1},
+      [ADDRMODE_ZEROPAGE]    = {0x66, 2},
+      [ADDRMODE_ZEROPAGEX]   = {0x76, 2},
+      [ADDRMODE_ABSOLUTE]    = {0x6E, 3},
+      [ADDRMODE_ABSOLUTEX]   = {0x7E, 3},
+   },
+   [MNEMONIC_stx] =
+   {
+      [ADDRMODE_ZEROPAGE]  = {0x86, 2},
+      [ADDRMODE_ZEROPAGEY] = {0x96, 2},
+      [ADDRMODE_ABSOLUTE]  = {0x8E, 3},
+   },
+   [MNEMONIC_ldx] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0xA2, 2},
+      [ADDRMODE_ZEROPAGE]  = {0xA6, 2},
+      [ADDRMODE_ZEROPAGEY] = {0xB6, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xAE, 3},
+      [ADDRMODE_ABSOLUTEY] = {0xBE, 3},
+   },
+   [MNEMONIC_dec] =
+   {
+      [ADDRMODE_ZEROPAGE]  = {0xC6, 2},
+      [ADDRMODE_ZEROPAGEX] = {0xD6, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xCE, 3},
+      [ADDRMODE_ABSOLUTEX] = {0xDE, 3},
+   },
+   [MNEMONIC_inc] =
+   {
+      [ADDRMODE_ZEROPAGE]  = {0xE6, 2},
+      [ADDRMODE_ZEROPAGEX] = {0xF6, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xEE, 3},
+      [ADDRMODE_ABSOLUTEX] = {0xFE, 3},
+   },
 
    // Group 3
-   [MNEMONIC_bit] = {0, OPCODE_BIT, INSTRCODE_GROUP3},
-   [MNEMONIC_jmp] = {0, OPCODE_JMP, INSTRCODE_GROUP3},
-   [MNEMONIC_sty] = {0, OPCODE_STY, INSTRCODE_GROUP3},
-   [MNEMONIC_ldy] = {0, OPCODE_LDY, INSTRCODE_GROUP3},
-   [MNEMONIC_cpy] = {0, OPCODE_CPY, INSTRCODE_GROUP3},
-   [MNEMONIC_cpx] = {0, OPCODE_CPX, INSTRCODE_GROUP3},
+   [MNEMONIC_bit] =
+   {
+      [ADDRMODE_ZEROPAGE] = {0x24, 2},
+      [ADDRMODE_ABSOLUTE] = {0x2C, 3},
+   },
+   [MNEMONIC_jmp] =
+   {
+      [ADDRMODE_ABSOLUTE] = {0x4C, 3},
+      [ADDRMODE_INDIRECT] = {0x6C, 3},
+   },
+   [MNEMONIC_sty] =
+   {
+      [ADDRMODE_ZEROPAGE]  = {0x84, 2},
+      [ADDRMODE_ZEROPAGEX] = {0x94, 2},
+      [ADDRMODE_ABSOLUTE]  = {0x8C, 3},
+   },
+   [MNEMONIC_ldy] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0xA0, 2},
+      [ADDRMODE_ZEROPAGE]  = {0xA4, 2},
+      [ADDRMODE_ZEROPAGEX] = {0xB4, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xAC, 3},
+      [ADDRMODE_ABSOLUTEX] = {0xBC, 3},
+   },
+   [MNEMONIC_cpy] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0xC0, 2},
+      [ADDRMODE_ZEROPAGE]  = {0xC4, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xCC, 3},
+   },
+   [MNEMONIC_cpx] =
+   {
+      [ADDRMODE_IMMEDIATE] = {0xE0, 2},
+      [ADDRMODE_ZEROPAGE]  = {0xE4, 2},
+      [ADDRMODE_ABSOLUTE]  = {0xEC, 3},
+   },
 
-   // Branches
-   [MNEMONIC_bpl] = {0, OPCODE_BPL, INSTRCODE_BRANCH},
-   [MNEMONIC_bmi] = {0, OPCODE_BMI, INSTRCODE_BRANCH},
-   [MNEMONIC_bvc] = {0, OPCODE_BVC, INSTRCODE_BRANCH},
-   [MNEMONIC_bvs] = {0, OPCODE_BVS, INSTRCODE_BRANCH},
-   [MNEMONIC_bcc] = {0, OPCODE_BCC, INSTRCODE_BRANCH},
-   [MNEMONIC_bcs] = {0, OPCODE_BCS, INSTRCODE_BRANCH},
-   [MNEMONIC_bne] = {0, OPCODE_BNE, INSTRCODE_BRANCH},
-   [MNEMONIC_beq] = {0, OPCODE_BEQ, INSTRCODE_BRANCH},
+   // // Branches
+   [MNEMONIC_bpl] = {[ADDRMODE_RELATIVE] = {0x10, 2}},
+   [MNEMONIC_bmi] = {[ADDRMODE_RELATIVE] = {0x30, 2}},
+   [MNEMONIC_bvc] = {[ADDRMODE_RELATIVE] = {0x50, 2}},
+   [MNEMONIC_bvs] = {[ADDRMODE_RELATIVE] = {0x70, 2}},
+   [MNEMONIC_bcc] = {[ADDRMODE_RELATIVE] = {0x90, 2}},
+   [MNEMONIC_bcs] = {[ADDRMODE_RELATIVE] = {0xB0, 2}},
+   [MNEMONIC_bne] = {[ADDRMODE_RELATIVE] = {0xD0, 2}},
+   [MNEMONIC_beq] = {[ADDRMODE_RELATIVE] = {0xF0, 2}},
 
-   [MNEMONIC_jsr] = {0, OPCODE_JSR, INSTRCODE_JSR},
+   [MNEMONIC_jsr] = {[ADDRMODE_ABSOLUTE] = {0x20, 3}},
 
    // Single-byte
-   [MNEMONIC_brk] = {0x00},
-   [MNEMONIC_rti] = {0x40},
-   [MNEMONIC_rts] = {0x60},
+   [MNEMONIC_brk] = {[ADDRMODE_IMPLIED] = {0x00, 1}},
+   [MNEMONIC_rti] = {[ADDRMODE_IMPLIED] = {0x40, 1}},
+   [MNEMONIC_rts] = {[ADDRMODE_IMPLIED] = {0x60, 1}},
 
-   [MNEMONIC_php] = {0x08},
-   [MNEMONIC_plp] = {0x28},
-   [MNEMONIC_pha] = {0x48},
-   [MNEMONIC_pla] = {0x68},
-   [MNEMONIC_dey] = {0x88},
-   [MNEMONIC_tay] = {0xA8},
-   [MNEMONIC_iny] = {0xC8},
-   [MNEMONIC_inx] = {0xE8},
+   [MNEMONIC_php] = {[ADDRMODE_IMPLIED] = {0x08, 1}},
+   [MNEMONIC_plp] = {[ADDRMODE_IMPLIED] = {0x28, 1}},
+   [MNEMONIC_pha] = {[ADDRMODE_IMPLIED] = {0x48, 1}},
+   [MNEMONIC_pla] = {[ADDRMODE_IMPLIED] = {0x68, 1}},
+   [MNEMONIC_dey] = {[ADDRMODE_IMPLIED] = {0x88, 1}},
+   [MNEMONIC_tay] = {[ADDRMODE_IMPLIED] = {0xA8, 1}},
+   [MNEMONIC_iny] = {[ADDRMODE_IMPLIED] = {0xC8, 1}},
+   [MNEMONIC_inx] = {[ADDRMODE_IMPLIED] = {0xE8, 1}},
 
-   [MNEMONIC_clc] = {0x18},
-   [MNEMONIC_sec] = {0x38},
-   [MNEMONIC_cli] = {0x58},
-   [MNEMONIC_sei] = {0x78},
-   [MNEMONIC_tya] = {0x98},
-   [MNEMONIC_clv] = {0xB8},
-   [MNEMONIC_cld] = {0xD8},
-   [MNEMONIC_sed] = {0xF8},
+   [MNEMONIC_clc] = {[ADDRMODE_IMPLIED] = {0x18, 1}},
+   [MNEMONIC_sec] = {[ADDRMODE_IMPLIED] = {0x38, 1}},
+   [MNEMONIC_cli] = {[ADDRMODE_IMPLIED] = {0x58, 1}},
+   [MNEMONIC_sei] = {[ADDRMODE_IMPLIED] = {0x78, 1}},
+   [MNEMONIC_tya] = {[ADDRMODE_IMPLIED] = {0x98, 1}},
+   [MNEMONIC_clv] = {[ADDRMODE_IMPLIED] = {0xB8, 1}},
+   [MNEMONIC_cld] = {[ADDRMODE_IMPLIED] = {0xD8, 1}},
+   [MNEMONIC_sed] = {[ADDRMODE_IMPLIED] = {0xF8, 1}},
 
-   [MNEMONIC_txa] = {0x8A},
-   [MNEMONIC_txs] = {0x9A},
-   [MNEMONIC_tax] = {0xAA},
-   [MNEMONIC_tsx] = {0xBA},
-   [MNEMONIC_dex] = {0xCA},
-   [MNEMONIC_nop] = {0xEA},
+   [MNEMONIC_txa] = {[ADDRMODE_IMPLIED] = {0x8A, 1}},
+   [MNEMONIC_txs] = {[ADDRMODE_IMPLIED] = {0x9A, 1}},
+   [MNEMONIC_tax] = {[ADDRMODE_IMPLIED] = {0xAA, 1}},
+   [MNEMONIC_tsx] = {[ADDRMODE_IMPLIED] = {0xBA, 1}},
+   [MNEMONIC_dex] = {[ADDRMODE_IMPLIED] = {0xCA, 1}},
+   [MNEMONIC_nop] = {[ADDRMODE_IMPLIED] = {0xEA, 1}},
 };
 
-static map *Encoding_Map;
+typedef struct {
+   string Unresolved_Label;
+   s16 Value;
+} parsed_operand_data;
 
-static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
+static parsed_operand_data Parse_Operand_Data(string String, map *Constants)
 {
-   machine_code Result = {0};
+   parsed_operand_data Result = {0};
 
-   if(!Encoding_Map)
+   if(String.Length && String.Data[0] >= '0' && String.Data[0] <= '9')
    {
-      assert(Array_Count(Encoding_Table) == MNEMONIC_COUNT);
-#define X(M) Insert(&Context.Arena, &Encoding_Map, S(#M), MNEMONIC_##M);
-      MNEMONICS_LIST;
-#undef X
-   }
-
-   cut Instruction_Operands = Cut_Whitespace(Instruction);
-   string Mnemonic = Instruction_Operands.Before;
-   string Operands = Trim_Left(Instruction_Operands.After);
-
-   lookup_result Mnemonic_Lookup = Lookup(Encoding_Map, Mnemonic);
-   if(Mnemonic_Lookup.Found)
-   {
-      encoding_data Data = Encoding_Table[Mnemonic_Lookup.Value];
-      if(Instruction_Operands.Found)
+      // NOTE: A number literal will be encoded in either one or two bytes. Jump
+      // instructions (jmp and jsr) will always use two bytes.
+      parsed_integer Parsed_Number = Parse_Integer(String);
+      if(Parsed_Number.Ok)
       {
-         Result = Encode(Data.Opcode, Operands, Data.Group_Code);
+         // TODO: Report overflow.
+         Result.Value = (s16)Parsed_Number.Value;
       }
       else
       {
-         Result.Bytes[Result.Length++] = Data.Actual_Value;
+         Report_Error("Could not parse number literal \"%.*s\".", (int)String.Length, String.Data);
       }
+   }
+   else
+   {
+      lookup_result Constant = Lookup(Constants, String);
+      if(Constant.Found)
+      {
+         // TODO: Report overflow.
+         Result.Value = (s16)Constant.Value;
+      }
+      else
+      {
+         // Label (to be populated later)
+         Result.Value = 0xBEEF;
+         Result.Unresolved_Label = String;
+      }
+   }
+
+   return(Result);
+}
+
+static bool Requires_Two_Bytes(opcode_data *Addressing_Modes, s16 Value)
+{
+   bool Result = (Value > 127 || Value < -128 ||
+                  !(Addressing_Modes[ADDRMODE_IMMEDIATE].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_ZEROPAGE].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_ZEROPAGEX].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_ZEROPAGEY].Encoding_Length));
+
+   return(Result);
+}
+
+typedef struct {
+   addressing_mode Addressing_Mode;
+   parsed_operand_data Data;
+} parsed_operand;
+
+static parsed_operand Parse_Operand(string Operand, opcode_data *Addressing_Modes, map *Constants)
+{
+   parsed_operand Result = {0};
+
+   string Full_Operand = Operand;
+   parsed_operand_data Data = {0};
+   addressing_mode Addressing_Mode = 0;
+
+   if(Operand.Length == 0)
+   {
+      Addressing_Mode = ADDRMODE_IMPLIED;
+   }
+   else if(Equals(Operand, S("a")))
+   {
+      Addressing_Mode = ADDRMODE_ACCUMULATOR;
+   }
+   else if(Has_Prefix_Then_Remove(&Operand, S("[[")))
+   {
+      if(Has_Suffix_Then_Remove(&Operand, S(" + x]]")))
+      {
+         Addressing_Mode = ADDRMODE_INDIRECTX;
+         Data = Parse_Operand_Data(Operand, Constants);
+      }
+      else if(Has_Suffix_Then_Remove(&Operand, S("] + y]")))
+      {
+         Addressing_Mode = ADDRMODE_INDIRECTY;
+         Data = Parse_Operand_Data(Operand, Constants);
+      }
+      else
+      {
+         Report_Error("Unterminated double bracket in \"%.*s\".", (int)Full_Operand.Length, Full_Operand.Data);
+      }
+   }
+   else if(Has_Prefix_Then_Remove(&Operand, S("[")))
+   {
+      if(Has_Suffix_Then_Remove(&Operand, S(" + x]")))
+      {
+         Data = Parse_Operand_Data(Operand, Constants);
+         Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
+            ? ADDRMODE_ABSOLUTEX
+            : ADDRMODE_ZEROPAGEX;
+      }
+      else if(Has_Suffix_Then_Remove(&Operand, S(" + y]")))
+      {
+         Data = Parse_Operand_Data(Operand, Constants);
+         Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
+            ? ADDRMODE_ABSOLUTEY
+            : ADDRMODE_ZEROPAGEY;
+      }
+      else if(Has_Suffix_Then_Remove(&Operand, S("]")))
+      {
+         Data = Parse_Operand_Data(Operand, Constants);
+         Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
+            ? (Addressing_Modes[ADDRMODE_INDIRECT].Encoding_Length) ? ADDRMODE_INDIRECT : ADDRMODE_ABSOLUTE
+            : ADDRMODE_ZEROPAGE;
+      }
+      else
+      {
+         Report_Error("Unterminated bracket in \"%.*s\".", (int)Full_Operand.Length, Full_Operand.Data);
+      }
+   }
+   else if(Operand.Data[0] >= '0' && Operand.Data[0] <= '9')
+   {
+      Data = Parse_Operand_Data(Operand, Constants);
+      Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
+         ? ADDRMODE_ABSOLUTE
+         : (Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length) ? ADDRMODE_RELATIVE : ADDRMODE_IMMEDIATE;
+   }
+   else // Label
+   {
+      Data = Parse_Operand_Data(Operand, Constants);
+      Addressing_Mode = (Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length) ? ADDRMODE_RELATIVE : ADDRMODE_ABSOLUTE;
+   }
+
+   if(Addressing_Modes[Addressing_Mode].Encoding_Length)
+   {
+      Result.Addressing_Mode = Addressing_Mode;
+      Result.Data = Data;
+   }
+   else
+   {
+      Report_Error("Unsupported addressing mode \"%.*s\".", (int)Full_Operand.Length, Full_Operand.Data);
+   }
+
+   return(Result);
+}
+
+static map *Encoding_Map;
+
+static INITIALIZE_ARCHITECTURE(Initialize_Architecture)
+{
+   assert(Array_Count(Encoding_Table) == MNEMONIC_COUNT);
+
+#  define X(M) Insert(&Context->Arena, &Encoding_Map, S(#M), MNEMONIC_##M);
+   MNEMONICS_LIST;
+#  undef X
+}
+
+static ENCODE_INSTRUCTION(Encode_Instruction)
+{
+   machine_code Result = {0};
+
+   cut Instruction_Operand = Cut_Whitespace(Instruction);
+   string Mnemonic = Instruction_Operand.Before;
+
+   lookup_result Mnemonic_Index = Lookup(Encoding_Map, Mnemonic);
+   if(Mnemonic_Index.Found)
+   {
+      string Operand_String = Trim_Left(Instruction_Operand.After);
+      opcode_data *Addressing_Modes = Encoding_Table[Mnemonic_Index.Value];
+      parsed_operand Operand = Parse_Operand(Operand_String, Addressing_Modes, Context->Constants);
+
+      opcode_data Opcode_Data = Addressing_Modes[Operand.Addressing_Mode];
+
+      Result.Length = Opcode_Data.Encoding_Length;
+      Result.Label_Operand = Operand.Data.Unresolved_Label;
+
+      Result.Bytes[0] = Opcode_Data.Opcode;
+      if(Result.Length > 1) Result.Bytes[1] = (u8)(Operand.Data.Value << 0);
+      if(Result.Length > 2) Result.Bytes[2] = (u8)(Operand.Data.Value << 8);
    }
    else
    {
@@ -433,7 +476,7 @@ static GENERATE_MACHINE_INSTRUCTION(Generate_Machine_Instruction)
    return(Result);
 }
 
-static PATCH_LABEL_ADDRESS(Patch_Label_Address)
+static PATCH_INSTRUCTION(Patch_Instruction)
 {
    if(Result->Length == 2)
    {

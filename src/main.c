@@ -25,22 +25,7 @@ typedef struct {
    map *Constants;
 } assembler_context;
 
-static assembler_context Context;
-
-typedef struct {
-   int Length;
-   union
-   {
-      u8 Bytes[16];
-      u8 *Bytes_Pointer;
-   };
-
-   string Label_Operand;
-} machine_code;
-
-#define GENERATE_MACHINE_INSTRUCTION(Name) machine_code Name(string Instruction)
-#define PATCH_LABEL_ADDRESS(Name) void Name(machine_code *Result, index Instruction_Address, index Label_Address)
-
+#include "architecture.h"
 #if ARCH_6502
 #   include "architecture_6502.c"
 #elif ARCH_ARMV4T
@@ -63,7 +48,7 @@ typedef struct {
    machine_code Machine_Code;
 } source_code_line;
 
-static void Encode_Literal_Bytes(source_code_line *Line, int Bytes_Per_Literal)
+static void Encode_Literal_Bytes(arena *Arena, source_code_line *Line, int Bytes_Per_Literal)
 {
    machine_code Result = {0};
 
@@ -88,7 +73,7 @@ static void Encode_Literal_Bytes(source_code_line *Line, int Bytes_Per_Literal)
       Result.Length = Literal_Count * Bytes_Per_Literal;
       if(Result.Length > Array_Count(Result.Bytes))
       {
-         Destination = Allocate(&Context.Arena, u8, Result.Length);
+         Destination = Allocate(Arena, u8, Result.Length);
          Result.Bytes_Pointer = Destination;
       }
 
@@ -127,7 +112,7 @@ typedef enum {
    STRINGKIND_CSTRING,
 } string_kind;
 
-static void Encode_Literal_String(source_code_line *Line, string_kind Kind)
+static void Encode_Literal_String(arena *Arena, source_code_line *Line, string_kind Kind)
 {
    machine_code Result = {0};
 
@@ -146,7 +131,7 @@ static void Encode_Literal_String(source_code_line *Line, string_kind Kind)
          u8 *Destination = Result.Bytes;
          if(Result.Length > Array_Count(Result.Bytes))
          {
-            Destination = Allocate(&Context.Arena, u8, Result.Length);
+            Destination = Allocate(Arena, u8, Result.Length);
             Result.Bytes_Pointer = Destination;
          }
 
@@ -280,7 +265,7 @@ typedef struct {
    string File_Name;
 } parse_result;
 
-static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
+static parse_result Parse_Source_Lines(assembler_context *Context, source_code_line *Lines, int Line_Count)
 {
    parse_result Result = {0};
 
@@ -309,27 +294,27 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("bytes ")))
          {
-            Encode_Literal_Bytes(Line, 1);
+            Encode_Literal_Bytes(&Context->Arena, Line, 1);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("2bytes ")))
          {
-            Encode_Literal_Bytes(Line, 2);
+            Encode_Literal_Bytes(&Context->Arena, Line, 2);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("4bytes ")))
          {
-            Encode_Literal_Bytes(Line, 4);
+            Encode_Literal_Bytes(&Context->Arena, Line, 4);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("8bytes ")))
          {
-            Encode_Literal_Bytes(Line, 8);
+            Encode_Literal_Bytes(&Context->Arena, Line, 8);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("string ")))
          {
-            Encode_Literal_String(Line, STRINGKIND_STRING);
+            Encode_Literal_String(&Context->Arena, Line, STRINGKIND_STRING);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("cstring ")))
          {
-            Encode_Literal_String(Line, STRINGKIND_CSTRING);
+            Encode_Literal_String(&Context->Arena, Line, STRINGKIND_CSTRING);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("constant ")))
          {
@@ -341,7 +326,7 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
                parsed_integer Parsed_Value = Parse_Integer(Value);
                if(Parsed_Value.Ok)
                {
-                  Insert(&Context.Arena, &Context.Constants, Name, Parsed_Value.Value);
+                  Insert(&Context->Arena, &Context->Constants, Name, Parsed_Value.Value);
                }
                else
                {
@@ -353,12 +338,12 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
 
       if(Line->Label.Length)
       {
-         Insert(&Context.Arena, &Context.Constants, Line->Label, Line->Machine_Address);
+         Insert(&Context->Arena, &Context->Constants, Line->Label, Line->Machine_Address);
       }
 
       if(Line->Instruction.Length)
       {
-         Line->Machine_Code = Generate_Machine_Instruction(Line->Instruction);
+         Line->Machine_Code = Encode_Instruction(Context, Line->Instruction);
          Line->Machine_Address = Result.Size;
       }
 
@@ -368,7 +353,7 @@ static parse_result Parse_Source_Lines(source_code_line *Lines, int Line_Count)
    return(Result);
 }
 
-static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Count)
+static void Write_Machine_Code(assembler_context *Context, u8 *Result, source_code_line *Lines, int Line_Count)
 {
    index Output_Machine_Address = 0;
 
@@ -379,10 +364,10 @@ static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Cou
 
       if(Label.Length)
       {
-         lookup_result Label_Address = Lookup(Context.Constants, Label);
+         lookup_result Label_Address = Lookup(Context->Constants, Label);
          if(Label_Address.Found)
          {
-            Patch_Label_Address(&Line->Machine_Code, Line->Machine_Address, Label_Address.Value);
+            Patch_Instruction(&Line->Machine_Code, Line->Machine_Address, Label_Address.Value);
          }
          else
          {
@@ -404,35 +389,40 @@ static void Write_Machine_Code(u8 *Result, source_code_line *Lines, int Line_Cou
 
 int main(int Argument_Count, char **Arguments)
 {
+   assembler_context Context = {0};
+   Context.Arena.Size = 1024 * 1024 * 1024;
+   Context.Arena.Base = malloc(Context.Arena.Size);
+
    arena *Arena = &Context.Arena;
-   Arena->Size = 1024 * 1024 * 1024;
-   Arena->Base = malloc(Arena->Size);
+
+   Initialize_Architecture(&Context);
 
    // NOTE: For now, assume that all provided arguments are input files.
    for(int Argument_Index = 1; Argument_Index < Argument_Count; ++Argument_Index)
    {
       char *Source_Code_Path_0 = Arguments[Argument_Index];
       string Source_Code = Read_Entire_File(Arena, Source_Code_Path_0);
+
       if(Source_Code.Length)
       {
          // First pass to determine the number of lines to allocate. This will
          // include any non-empty line of source code.
-         string Source_Code_Path = From_C_String(Source_Code_Path_0);
          int Line_Count = Count_Lines_Of_Code(Source_Code);
 
          // Second pass to identify directives, labels and instructions for each
          // allocated line of assembly code.
          source_code_line *Lines = Allocate(Arena, source_code_line, Line_Count);
+         string Source_Code_Path = From_C_String(Source_Code_Path_0);
          Tokenize_Source_Lines(Lines, Source_Code, Source_Code_Path);
 
          // Third pass to generate machine code based on identified assembly
          // instructions. The address associated with each label is stored.
-         parse_result Parse_Result = Parse_Source_Lines(Lines, Line_Count);
+         parse_result Parse_Result = Parse_Source_Lines(&Context, Lines, Line_Count);
 
          // Fourth pass to populate output buffer with machine code and patch
          // addresses into any instructions that reference labels.
          u8 *Output = Allocate(Arena, u8, Parse_Result.Size);
-         Write_Machine_Code(Output, Lines, Line_Count);
+         Write_Machine_Code(&Context, Output, Lines, Line_Count);
 
          string Output_File_Name = {0};
          if(Parse_Result.File_Name.Length)
@@ -457,6 +447,8 @@ int main(int Argument_Count, char **Arguments)
          // when using the CRT. So maybe stop using CRT functions.
          Write_Entire_File(Output, Parse_Result.Size, To_C_String(Arena, Output_File_Name));
       }
+
+      Reset_Arena(Arena);
    }
 
    return(0);

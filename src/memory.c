@@ -18,13 +18,18 @@ typedef ptrdiff_t index;
 #include <string.h>
 #undef index
 
+#define Array_Count(Array) (index)(sizeof(Array) / sizeof((Array)[0]))
+
 typedef struct {
    u8 *Base;
    index Size;
    index Used;
 } arena;
 
-#define Array_Count(Array) (index)(sizeof(Array) / sizeof((Array)[0]))
+static void Reset_Arena(arena *Arena)
+{
+   Arena->Used = 0;
+}
 
 #define Allocate(Arena, type, Count)                        \
    (type *)Allocate_Size((Arena), sizeof(type) * (Count))
