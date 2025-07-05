@@ -308,7 +308,7 @@ static parsed_operand_data Parse_Operand_Data(string String, map *Constants)
       }
       else
       {
-         Report_Error("Could not parse number literal \"%.*s\".", (int)String.Length, String.Data);
+         Report_Error("Could not parse number literal \"%.*s\".", SF(String));
       }
    }
    else
@@ -377,7 +377,7 @@ static parsed_operand Parse_Operand(string Operand, opcode_data *Addressing_Mode
       }
       else
       {
-         Report_Error("Unterminated double bracket in \"%.*s\".", (int)Full_Operand.Length, Full_Operand.Data);
+         Report_Error("Unterminated double bracket in \"%.*s\".", SF(Full_Operand));
       }
    }
    else if(Has_Prefix_Then_Remove(&Operand, S("[")))
@@ -405,7 +405,7 @@ static parsed_operand Parse_Operand(string Operand, opcode_data *Addressing_Mode
       }
       else
       {
-         Report_Error("Unterminated bracket in \"%.*s\".", (int)Full_Operand.Length, Full_Operand.Data);
+         Report_Error("Unterminated bracket in \"%.*s\".", SF(Full_Operand));
       }
    }
    else if(Operand.Data[0] >= '0' && Operand.Data[0] <= '9')
@@ -428,7 +428,7 @@ static parsed_operand Parse_Operand(string Operand, opcode_data *Addressing_Mode
    }
    else
    {
-      Report_Error("Unsupported addressing mode \"%.*s\".", (int)Full_Operand.Length, Full_Operand.Data);
+      Report_Error("Unsupported addressing mode \"%.*s\".", SF(Full_Operand));
    }
 
    return(Result);
@@ -450,13 +450,13 @@ static ENCODE_INSTRUCTION(Encode_Instruction)
    machine_code Result = {0};
 
    cut Instruction_Operand = Cut_Whitespace(Instruction);
-   string Mnemonic = Instruction_Operand.Before;
+   string Mnemonic_String = Instruction_Operand.Before;
 
-   lookup_result Mnemonic_Index = Lookup(Encoding_Map, Mnemonic);
-   if(Mnemonic_Index.Found)
+   lookup_result Mnemonic = Lookup(Encoding_Map, Mnemonic_String);
+   if(Mnemonic.Found)
    {
       string Operand_String = Trim_Left(Instruction_Operand.After);
-      opcode_data *Addressing_Modes = Encoding_Table[Mnemonic_Index.Value];
+      opcode_data *Addressing_Modes = Encoding_Table[Mnemonic.Value];
       parsed_operand Operand = Parse_Operand(Operand_String, Addressing_Modes, Context->Constants);
 
       opcode_data Opcode_Data = Addressing_Modes[Operand.Addressing_Mode];
@@ -470,7 +470,7 @@ static ENCODE_INSTRUCTION(Encode_Instruction)
    }
    else
    {
-      Report_Error("Did not recognize mnemonic \"%.*s\".\n", (int)Mnemonic.Length, Mnemonic.Data);
+      Report_Error("Did not recognize mnemonic \"%.*s\".\n", SF(Mnemonic_String));
    }
 
    return(Result);

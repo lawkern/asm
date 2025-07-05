@@ -1,5 +1,7 @@
 \ This comment goes until the end of the line.
 
+#file example_armv4_00.bin
+
 #arch armv4t
 #section text
 

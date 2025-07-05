@@ -4,6 +4,7 @@
 // implement.
 
 typedef struct {
+   index Address;
    index Length;
    union
    {
@@ -12,6 +13,15 @@ typedef struct {
    };
    string Label_Operand;
 } machine_code;
+
+typedef struct {
+   string Label;
+   string Instruction;
+   string Directive;
+   int Line_Number;
+
+   machine_code Machine_Code;
+} source_code_line;
 
 #define INITIALIZE_ARCHITECTURE(Name) void Name(assembler_context *Context)
 static INITIALIZE_ARCHITECTURE(Initialize_Architecture);

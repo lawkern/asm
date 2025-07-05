@@ -56,6 +56,7 @@ typedef struct {
 } string;
 
 #define S(Literal) (string){(u8 *)(Literal), sizeof(Literal)-1}
+#define SF(String) (int)(String).Length, (String).Data
 
 static string Span(u8 *Begin, u8 *End)
 {
@@ -372,18 +373,8 @@ static bool Write_Entire_File(u8 *Memory, index Size, char *Path)
    FILE *File = fopen(Path, "wb");
    if(File)
    {
-      if(fwrite(Memory, 1, Size, File) == (size_t)Size)
-      {
-         // Success
-      }
-      else
-      {
-         Report_Error("Failed to write to file \"%s\".", Path);
-      }
-   }
-   else
-   {
-      Report_Error("Failed to create file \"%s\".", Path);
+      size_t Bytes_Written = fwrite(Memory, 1, Size, File);
+      Result = (Bytes_Written == (size_t)Size);
    }
 
    return(Result);

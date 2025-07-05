@@ -20,41 +20,43 @@ static void Report_Error(char *Message, ...)
 
 #include "memory.c"
 
+static void Report_Error_Location(string Path, int Line_Number, char *Message, ...)
+{
+   fprintf(stderr, "%.*s:%d: error: ", SF(Path), Line_Number);
+
+   va_list Arguments;
+   va_start(Arguments, Message);
+   vfprintf(stderr, Message, Arguments);
+   va_end(Arguments);
+
+   fprintf(stderr, "\n");
+}
+
 typedef struct {
    arena Arena;
    map *Constants;
+
+   string Path;
 } assembler_context;
 
 #include "architecture.h"
 #if ARCH_6502
 #   include "architecture_6502.c"
-#elif ARCH_ARMV4T
-#   include "architecture_armv4t.c"
+#elif ARCH_ARMV4
+#   include "architecture_armv4.c"
 #elif ARCH_ARMV8
 #   include "architecture_armv8.c"
 #else
 #   error Unhandled architecture.
 #endif
 
-typedef struct {
-   string Source_Code_Path;
-   int Source_Code_Line_Number;
-
-   string Label;
-   string Instruction;
-   string Directive;
-
-   index Machine_Address;
-   machine_code Machine_Code;
-} source_code_line;
-
-static void Encode_Literal_Bytes(arena *Arena, source_code_line *Line, int Bytes_Per_Literal)
+static void Encode_Literal_Bytes(assembler_context *Context, source_code_line *Line, int Bytes_Per_Literal)
 {
-   machine_code Result = {0};
-
+   // NOTE: Produce the literal byte values supplied by the #*bytes assembler
+   // directives.
    if(Line->Instruction.Length)
    {
-      Report_Error("Don't use an embedding directive on the same line as an instruction.");
+      Report_Error_Location(Context->Path, Line->Line_Number, "Don't use an embedding directive on the same line as an instruction.");
    }
    else
    {
@@ -69,12 +71,12 @@ static void Encode_Literal_Bytes(arena *Arena, source_code_line *Line, int Bytes
          Literal_Count++;
       }
 
-      u8 *Destination = Result.Bytes;
-      Result.Length = Literal_Count * Bytes_Per_Literal;
-      if(Result.Length > Array_Count(Result.Bytes))
+      u8 *Destination = Line->Machine_Code.Bytes;
+      Line->Machine_Code.Length = Literal_Count * Bytes_Per_Literal;
+      if(Line->Machine_Code.Length > Array_Count(Line->Machine_Code.Bytes))
       {
-         Destination = Allocate(Arena, u8, Result.Length);
-         Result.Bytes_Pointer = Destination;
+         Destination = Allocate(&Context->Arena, u8, Line->Machine_Code.Length);
+         Line->Machine_Code.Bytes_Pointer = Destination;
       }
 
       // Populate Literals.
@@ -98,13 +100,11 @@ static void Encode_Literal_Bytes(arena *Arena, source_code_line *Line, int Bytes
             }
             else
             {
-               Report_Error("Could not parse \"%.*s\" as an integer literal.", (int)Literals.Before.Length, Literals.Before.Data);
+               Report_Error_Location(Context->Path, Line->Line_Number, "Could not parse \"%.*s\" as an integer literal.", SF(Literals.Before));
             }
          }
       }
    }
-
-   Line->Machine_Code = Result;
 }
 
 typedef enum {
@@ -112,13 +112,13 @@ typedef enum {
    STRINGKIND_CSTRING,
 } string_kind;
 
-static void Encode_Literal_String(arena *Arena, source_code_line *Line, string_kind Kind)
+static void Encode_Literal_String(assembler_context *Context, source_code_line *Line, string_kind Kind)
 {
-   machine_code Result = {0};
+   machine_code *Result = &Line->Machine_Code;
 
    if(Line->Instruction.Length)
    {
-      Report_Error("Don't use an embedding directive on the same line as an instruction.");
+      Report_Error_Location(Context->Path, Line->Line_Number, "Don't use an embedding directive on the same line as an instruction.");
    }
    else
    {
@@ -126,70 +126,29 @@ static void Encode_Literal_String(arena *Arena, source_code_line *Line, string_k
          Has_Suffix_Then_Remove(&Line->Directive, S("\"")))
       {
          bool Null_Terminate = (Kind == STRINGKIND_CSTRING);
-         Result.Length = Line->Directive.Length + Null_Terminate;
+         Result->Length = Line->Directive.Length + Null_Terminate;
 
-         u8 *Destination = Result.Bytes;
-         if(Result.Length > Array_Count(Result.Bytes))
+         u8 *Destination = Result->Bytes;
+         if(Result->Length > Array_Count(Result->Bytes))
          {
-            Destination = Allocate(Arena, u8, Result.Length);
-            Result.Bytes_Pointer = Destination;
+            Destination = Allocate(&Context->Arena, u8, Result->Length);
+            Result->Bytes_Pointer = Destination;
          }
 
-         for(int Byte_Index = 0; Byte_Index < (Result.Length - Null_Terminate); ++Byte_Index)
+         for(int Byte_Index = 0; Byte_Index < (Result->Length - Null_Terminate); ++Byte_Index)
          {
             Destination[Byte_Index] = Line->Directive.Data[Byte_Index];
          }
          if(Null_Terminate)
          {
-            Destination[Result.Length] = 0;
+            Destination[Result->Length] = 0;
          }
       }
       else
       {
-         Report_Error("Use double quotes for string literals.");
+         Report_Error_Location(Context->Path, Line->Line_Number, "Use double quotes for string literals.");
       }
    }
-
-   Line->Machine_Code = Result;
-}
-
-static void Print_Instruction(source_code_line *Line)
-{
-   printf("%.*s:%-4d | ",
-          (int)Line->Source_Code_Path.Length,
-          Line->Source_Code_Path.Data,
-          Line->Source_Code_Line_Number);
-
-   if(Line->Machine_Code.Length)
-   {
-      printf("0x%04x: ", (u32)Line->Machine_Address);
-      for(int Index = 0; Index < Line->Machine_Code.Length; ++Index)
-      {
-         printf("%02x ", Line->Machine_Code.Bytes[Index]);
-      }
-      for(int Index = 4; Index >= (Line->Machine_Code.Length); --Index)
-      {
-         printf("   ");
-      }
-   }
-   else
-   {
-      printf("                       ");
-   }
-   printf(" | ");
-
-   printf("%-20.*s | ", (int)Line->Instruction.Length, Line->Instruction.Data);
-
-   if(Line->Label.Length)
-   {
-      printf("Label('%.*s') ", (int)Line->Label.Length, Line->Label.Data);
-   }
-   if(Line->Directive.Length)
-   {
-      printf("Directive('%.*s') ", (int)Line->Directive.Length, Line->Directive.Data);
-   }
-
-   printf("\n");
 }
 
 static int Count_Lines_Of_Code(string Source_Code)
@@ -210,7 +169,7 @@ static int Count_Lines_Of_Code(string Source_Code)
    return(Result);
 }
 
-static void Tokenize_Source_Lines(source_code_line *Result, string Source_Code, string Source_Code_Path)
+static void Tokenize_Source_Lines(source_code_line *Result, string Source_Code)
 {
    int Source_Line_Number = 1;
    int Current_Line_Index = 0; // Index of allocated source line to populate.
@@ -226,8 +185,7 @@ static void Tokenize_Source_Lines(source_code_line *Result, string Source_Code, 
       string Text = Trim(Comment.Before);
 
       source_code_line Line = {0};
-      Line.Source_Code_Path = Source_Code_Path;
-      Line.Source_Code_Line_Number = Source_Line_Number++;
+      Line.Line_Number = Source_Line_Number++;
 
       if(Text.Length > 0)
       {
@@ -272,7 +230,7 @@ static parse_result Parse_Source_Lines(assembler_context *Context, source_code_l
    for(int Line_Index = 0; Line_Index < Line_Count; ++Line_Index)
    {
       source_code_line *Line = Lines + Line_Index;
-      Line->Machine_Address = Result.Size;
+      Line->Machine_Code.Address = Result.Size;
 
       if(Line->Directive.Length)
       {
@@ -289,32 +247,32 @@ static parse_result Parse_Source_Lines(assembler_context *Context, source_code_l
             }
             else
             {
-               Report_Error("Failed to parse #location value: \"%.*s\".", Line->Directive);
+               Report_Error_Location(Context->Path, Line->Line_Number, "Failed to parse #location value: \"%.*s\".", Line->Directive);
             }
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("bytes ")))
          {
-            Encode_Literal_Bytes(&Context->Arena, Line, 1);
+            Encode_Literal_Bytes(Context, Line, 1);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("2bytes ")))
          {
-            Encode_Literal_Bytes(&Context->Arena, Line, 2);
+            Encode_Literal_Bytes(Context, Line, 2);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("4bytes ")))
          {
-            Encode_Literal_Bytes(&Context->Arena, Line, 4);
+            Encode_Literal_Bytes(Context, Line, 4);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("8bytes ")))
          {
-            Encode_Literal_Bytes(&Context->Arena, Line, 8);
+            Encode_Literal_Bytes(Context, Line, 8);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("string ")))
          {
-            Encode_Literal_String(&Context->Arena, Line, STRINGKIND_STRING);
+            Encode_Literal_String(Context, Line, STRINGKIND_STRING);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("cstring ")))
          {
-            Encode_Literal_String(&Context->Arena, Line, STRINGKIND_CSTRING);
+            Encode_Literal_String(Context, Line, STRINGKIND_CSTRING);
          }
          else if(Has_Prefix_Then_Remove(&Line->Directive, S("constant ")))
          {
@@ -330,7 +288,7 @@ static parse_result Parse_Source_Lines(assembler_context *Context, source_code_l
                }
                else
                {
-                  Report_Error("Invalid integer value: %.*s", (int)Value.Length, Value.Data);
+                  Report_Error_Location(Context->Path, Line->Line_Number, "Invalid integer value: %.*s", SF(Value));
                }
             }
          }
@@ -338,13 +296,13 @@ static parse_result Parse_Source_Lines(assembler_context *Context, source_code_l
 
       if(Line->Label.Length)
       {
-         Insert(&Context->Arena, &Context->Constants, Line->Label, Line->Machine_Address);
+         Insert(&Context->Arena, &Context->Constants, Line->Label, Line->Machine_Code.Address);
       }
 
       if(Line->Instruction.Length)
       {
          Line->Machine_Code = Encode_Instruction(Context, Line->Instruction);
-         Line->Machine_Address = Result.Size;
+         Line->Machine_Code.Address = Result.Size;
       }
 
       Result.Size += Line->Machine_Code.Length;
@@ -367,15 +325,15 @@ static void Write_Machine_Code(assembler_context *Context, u8 *Result, source_co
          lookup_result Label_Address = Lookup(Context->Constants, Label);
          if(Label_Address.Found)
          {
-            Patch_Instruction(&Line->Machine_Code, Line->Machine_Address, Label_Address.Value);
+            Patch_Instruction(&Line->Machine_Code, Line->Machine_Code.Address, Label_Address.Value);
          }
          else
          {
-            Report_Error("Reference to missing label \"%.*s\".", (int)Label.Length, Label.Data);
+            Report_Error_Location(Context->Path, Line->Line_Number, "Reference to missing label \"%.*s\".", SF(Label));
          }
       }
 
-      Output_Machine_Address = Line->Machine_Address;
+      Output_Machine_Address = Line->Machine_Code.Address;
       u8 *Source = (Line->Machine_Code.Length > Array_Count(Line->Machine_Code.Bytes))
          ? Line->Machine_Code.Bytes_Pointer
          : Line->Machine_Code.Bytes;
@@ -400,11 +358,13 @@ int main(int Argument_Count, char **Arguments)
    // NOTE: For now, assume that all provided arguments are input files.
    for(int Argument_Index = 1; Argument_Index < Argument_Count; ++Argument_Index)
    {
-      char *Source_Code_Path_0 = Arguments[Argument_Index];
-      string Source_Code = Read_Entire_File(Arena, Source_Code_Path_0);
+      char *Path = Arguments[Argument_Index];
+      string Source_Code = Read_Entire_File(Arena, Path);
 
       if(Source_Code.Length)
       {
+         Context.Path = From_C_String(Path);
+
          // First pass to determine the number of lines to allocate. This will
          // include any non-empty line of source code.
          int Line_Count = Count_Lines_Of_Code(Source_Code);
@@ -412,8 +372,7 @@ int main(int Argument_Count, char **Arguments)
          // Second pass to identify directives, labels and instructions for each
          // allocated line of assembly code.
          source_code_line *Lines = Allocate(Arena, source_code_line, Line_Count);
-         string Source_Code_Path = From_C_String(Source_Code_Path_0);
-         Tokenize_Source_Lines(Lines, Source_Code, Source_Code_Path);
+         Tokenize_Source_Lines(Lines, Source_Code);
 
          // Third pass to generate machine code based on identified assembly
          // instructions. The address associated with each label is stored.
@@ -432,23 +391,28 @@ int main(int Argument_Count, char **Arguments)
          else
          {
             // Use the input file name for output if no #file directive.
-            cut Path = {0};
-            Path.After = Source_Code_Path;
-            while(Path.After.Length)
+            cut Nodes = {0};
+            Nodes.After = Context.Path;
+            while(Nodes.After.Length)
             {
-               Path = Cut(Path.After, '/');
+               Nodes = Cut(Nodes.After, '/');
             }
-            Output_File_Name = Path.Before;
+            Output_File_Name = Nodes.Before;
             Has_Suffix_Then_Remove(&Output_File_Name, S(".asm"));
          }
 
          // TODO: Converting back and forth to null-terminated strings is silly,
          // but the file read and write functions work more naturally with them
          // when using the CRT. So maybe stop using CRT functions.
-         Write_Entire_File(Output, Parse_Result.Size, To_C_String(Arena, Output_File_Name));
+         if(!Write_Entire_File(Output, Parse_Result.Size, To_C_String(Arena, Output_File_Name)))
+         {
+            Report_Error("Failed to write to output file \"%.*s\".", SF(Output_File_Name));
+         }
       }
 
+      // Reset assembler state for the next input file.
       Reset_Arena(Arena);
+      Context.Constants = 0;
    }
 
    return(0);
