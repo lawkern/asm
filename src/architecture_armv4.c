@@ -53,10 +53,3 @@ static ENCODE_INSTRUCTION(Encode_Instruction)
    machine_code Result = {0};
    return(Result);
 }
-
-static PATCH_INSTRUCTION(Patch_Instruction)
-{
-   (void)Result;
-   (void)Instruction_Address;
-   (void)Label_Address;
-}

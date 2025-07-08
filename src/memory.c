@@ -44,7 +44,7 @@ static void *Allocate_Size(arena *Arena, index Size)
    }
    else
    {
-      Report_Error("Arena ran out of memory, failed to allocate %zu bytes.", Size);
+      Report_Error(0, "Arena ran out of memory, failed to allocate %zu bytes.", Size);
    }
 
    return(Result);
@@ -355,12 +355,12 @@ static string Read_Entire_File(arena *Arena, char *Path)
 
       if(Result.Length == Available_Space)
       {
-         Report_Error("File exhausted arena memory, likely truncating \"%s\".", Path);
+         Report_Error(0, "File exhausted arena memory, likely truncating \"%s\".", Path);
       }
    }
    else
    {
-      Report_Error("Failed to open file \"%s\".", Path);
+      Report_Error(0, "Failed to open file \"%s\".", Path);
    }
 
    return(Result);

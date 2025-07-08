@@ -26,11 +26,11 @@ Test2: lda [0x01 + x]           \ Load byte at zero page address + x-offset into
     lda [[0x01 + x]]            \ Load byte at indexed indirect into a
     lda [[0x01] + y]            \ Load byte at indirect indexed into a
 
-Test3:
 
-#constant Zero_Address 0x01
-#constant Base_Address 0x0123
+#constant Zero_Address 0xAB
+#constant Base_Address 0xCDEF
 
+#location 0x200
     sta [Zero_Address]          \ Store a at zero page address
     sta [Zero_Address + x]      \ Store a at zero page address + x-offset
     sta [Base_Address]          \ Store a at absolute address

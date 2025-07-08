@@ -289,10 +289,29 @@ static opcode_data Encoding_Table[][ADDRMODE_COUNT] =
 
 typedef struct {
    string Unresolved_Label;
+   index Length;
    s16 Value;
 } parsed_operand_data;
 
-static parsed_operand_data Parse_Operand_Data(string String, map *Constants)
+typedef struct {
+   addressing_mode Addressing_Mode;
+   parsed_operand_data Data;
+} parsed_operand;
+
+static index Required_Byte_Count(opcode_data *Addressing_Modes, s16 Value)
+{
+   bool Requires_Two_Bytes = (Value > 127 || Value < -128 ||
+                  !(Addressing_Modes[ADDRMODE_IMMEDIATE].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_ZEROPAGE].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_ZEROPAGEX].Encoding_Length ||
+                    Addressing_Modes[ADDRMODE_ZEROPAGEY].Encoding_Length));
+
+   index Result = (Requires_Two_Bytes) ? 2 : 1;
+   return(Result);
+}
+
+static parsed_operand_data Parse_Operand_Data(assembler_context *Context, string String, opcode_data *Addressing_Modes, map *Constants)
 {
    parsed_operand_data Result = {0};
 
@@ -305,10 +324,11 @@ static parsed_operand_data Parse_Operand_Data(string String, map *Constants)
       {
          // TODO: Report overflow.
          Result.Value = (s16)Parsed_Number.Value;
+         Result.Length = Required_Byte_Count(Addressing_Modes, Result.Value);
       }
       else
       {
-         Report_Error("Could not parse number literal \"%.*s\".", SF(String));
+         Report_Error(Context, "Could not parse number literal \"%.*s\".", SF(String));
       }
    }
    else
@@ -318,36 +338,20 @@ static parsed_operand_data Parse_Operand_Data(string String, map *Constants)
       {
          // TODO: Report overflow.
          Result.Value = (s16)Constant.Value;
+         Result.Length = Required_Byte_Count(Addressing_Modes, Result.Value);
       }
       else
       {
          // Label (to be populated later)
-         Result.Value = 0xBEEF;
          Result.Unresolved_Label = String;
       }
    }
 
-   return(Result);
-}
-
-static bool Requires_Two_Bytes(opcode_data *Addressing_Modes, s16 Value)
-{
-   bool Result = (Value > 127 || Value < -128 ||
-                  !(Addressing_Modes[ADDRMODE_IMMEDIATE].Encoding_Length ||
-                    Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length ||
-                    Addressing_Modes[ADDRMODE_ZEROPAGE].Encoding_Length ||
-                    Addressing_Modes[ADDRMODE_ZEROPAGEX].Encoding_Length ||
-                    Addressing_Modes[ADDRMODE_ZEROPAGEY].Encoding_Length));
 
    return(Result);
 }
 
-typedef struct {
-   addressing_mode Addressing_Mode;
-   parsed_operand_data Data;
-} parsed_operand;
-
-static parsed_operand Parse_Operand(string Operand, opcode_data *Addressing_Modes, map *Constants)
+static parsed_operand Parse_Operand(assembler_context *Context, string Operand, opcode_data *Addressing_Modes, map *Constants)
 {
    parsed_operand Result = {0};
 
@@ -368,56 +372,56 @@ static parsed_operand Parse_Operand(string Operand, opcode_data *Addressing_Mode
       if(Has_Suffix_Then_Remove(&Operand, S(" + x]]")))
       {
          Addressing_Mode = ADDRMODE_INDIRECTX;
-         Data = Parse_Operand_Data(Operand, Constants);
+         Data = Parse_Operand_Data(Context, Operand, Addressing_Modes, Constants);
       }
       else if(Has_Suffix_Then_Remove(&Operand, S("] + y]")))
       {
          Addressing_Mode = ADDRMODE_INDIRECTY;
-         Data = Parse_Operand_Data(Operand, Constants);
+         Data = Parse_Operand_Data(Context, Operand, Addressing_Modes, Constants);
       }
       else
       {
-         Report_Error("Unterminated double bracket in \"%.*s\".", SF(Full_Operand));
+         Report_Error(Context, "Unterminated double bracket in \"%.*s\".", SF(Full_Operand));
       }
    }
    else if(Has_Prefix_Then_Remove(&Operand, S("[")))
    {
       if(Has_Suffix_Then_Remove(&Operand, S(" + x]")))
       {
-         Data = Parse_Operand_Data(Operand, Constants);
-         Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
-            ? ADDRMODE_ABSOLUTEX
-            : ADDRMODE_ZEROPAGEX;
+         Data = Parse_Operand_Data(Context, Operand, Addressing_Modes, Constants);
+         Addressing_Mode = (Data.Length == 1)
+            ? ADDRMODE_ZEROPAGEX
+            : ADDRMODE_ABSOLUTEX;
       }
       else if(Has_Suffix_Then_Remove(&Operand, S(" + y]")))
       {
-         Data = Parse_Operand_Data(Operand, Constants);
-         Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
-            ? ADDRMODE_ABSOLUTEY
-            : ADDRMODE_ZEROPAGEY;
+         Data = Parse_Operand_Data(Context, Operand, Addressing_Modes, Constants);
+         Addressing_Mode = (Data.Length == 1)
+            ? ADDRMODE_ZEROPAGEY
+            : ADDRMODE_ABSOLUTEY;
       }
       else if(Has_Suffix_Then_Remove(&Operand, S("]")))
       {
-         Data = Parse_Operand_Data(Operand, Constants);
-         Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
-            ? (Addressing_Modes[ADDRMODE_INDIRECT].Encoding_Length) ? ADDRMODE_INDIRECT : ADDRMODE_ABSOLUTE
-            : ADDRMODE_ZEROPAGE;
+         Data = Parse_Operand_Data(Context, Operand, Addressing_Modes, Constants);
+         Addressing_Mode = (Data.Length == 1)
+            ? ADDRMODE_ZEROPAGE
+            : (Addressing_Modes[ADDRMODE_INDIRECT].Encoding_Length) ? ADDRMODE_INDIRECT : ADDRMODE_ABSOLUTE;
       }
       else
       {
-         Report_Error("Unterminated bracket in \"%.*s\".", SF(Full_Operand));
+         Report_Error(Context, "Unterminated bracket in \"%.*s\".", SF(Full_Operand));
       }
    }
    else if(Operand.Data[0] >= '0' && Operand.Data[0] <= '9')
    {
-      Data = Parse_Operand_Data(Operand, Constants);
-      Addressing_Mode = Requires_Two_Bytes(Addressing_Modes, Data.Value)
-         ? ADDRMODE_ABSOLUTE
-         : (Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length) ? ADDRMODE_RELATIVE : ADDRMODE_IMMEDIATE;
+      Data = Parse_Operand_Data(Context, Operand, Addressing_Modes, Constants);
+      Addressing_Mode = (Data.Length == 1)
+         ? (Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length) ? ADDRMODE_RELATIVE : ADDRMODE_IMMEDIATE
+         : ADDRMODE_ABSOLUTE;
    }
-   else // Label
+   else // Label/Constant
    {
-      Data = Parse_Operand_Data(Operand, Constants);
+      Data = Parse_Operand_Data(Context, Operand, Addressing_Modes, Constants);
       Addressing_Mode = (Addressing_Modes[ADDRMODE_RELATIVE].Encoding_Length) ? ADDRMODE_RELATIVE : ADDRMODE_ABSOLUTE;
    }
 
@@ -428,7 +432,7 @@ static parsed_operand Parse_Operand(string Operand, opcode_data *Addressing_Mode
    }
    else
    {
-      Report_Error("Unsupported addressing mode \"%.*s\".", SF(Full_Operand));
+      Report_Error(Context, "Unsupported addressing mode \"%.*s\".", SF(Full_Operand));
    }
 
    return(Result);
@@ -457,37 +461,23 @@ static ENCODE_INSTRUCTION(Encode_Instruction)
    {
       string Operand_String = Trim_Left(Instruction_Operand.After);
       opcode_data *Addressing_Modes = Encoding_Table[Mnemonic.Value];
-      parsed_operand Operand = Parse_Operand(Operand_String, Addressing_Modes, Context->Constants);
+      parsed_operand Operand = Parse_Operand(Context, Operand_String, Addressing_Modes, Context->Constants);
+      if(Operand.Data.Unresolved_Label.Length)
+      {
+         Request_Patch(&Context->Arena, &Result, Operand.Data.Unresolved_Label, 1, Operand.Data.Length);
+      }
 
       opcode_data Opcode_Data = Addressing_Modes[Operand.Addressing_Mode];
 
       Result.Length = Opcode_Data.Encoding_Length;
-      Result.Label_Operand = Operand.Data.Unresolved_Label;
-
       Result.Bytes[0] = Opcode_Data.Opcode;
       if(Result.Length > 1) Result.Bytes[1] = (u8)(Operand.Data.Value << 0);
       if(Result.Length > 2) Result.Bytes[2] = (u8)(Operand.Data.Value << 8);
    }
    else
    {
-      Report_Error("Did not recognize mnemonic \"%.*s\".\n", SF(Mnemonic_String));
+      Report_Error(Context, "Did not recognize mnemonic \"%.*s\".", SF(Mnemonic_String));
    }
 
    return(Result);
-}
-
-static PATCH_INSTRUCTION(Patch_Instruction)
-{
-   if(Result->Length == 2)
-   {
-      // Relative address.
-      Result->Bytes[1] = (u8)(Label_Address - Instruction_Address);
-   }
-   else
-   {
-      // Absolute address.
-      assert(Result->Length == 3);
-      Result->Bytes[1] = (u8)(Label_Address >> 0);
-      Result->Bytes[2] = (u8)(Label_Address >> 8);
-   }
 }
